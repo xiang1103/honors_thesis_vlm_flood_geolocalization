@@ -158,9 +158,16 @@ def extract_videos(doc, base_url, json_objects):
     """
     out, seen = [], set()
 
+    page = (base_url or "").rstrip("/")
+
     def add(url, caption, thumb, dur, src):
         u = absolutize(base_url, url)
         if not u or u in seen:
+            return
+        # A "video" whose URL is just the article page is not a video. AP's
+        # VideoObject often omits contentUrl/embedUrl entirely, and falling
+        # back to its `url` field yields the page itself.
+        if u.rstrip("/") == page:
             return
         seen.add(u)
         out.append({"url": u,
@@ -180,7 +187,8 @@ def extract_videos(doc, base_url, json_objects):
             if isinstance(thumb, list):
                 thumb = thumb[0] if thumb else None
             cap = node.get("description") or node.get("name") or ""
-            add(node.get("contentUrl") or node.get("embedUrl") or node.get("url"),
+            # contentUrl/embedUrl only -- never `url`, which is the page.
+            add(node.get("contentUrl") or node.get("embedUrl"),
                 cap, thumb, iso8601_duration_to_seconds(node.get("duration")),
                 "jsonld")
 
@@ -218,6 +226,11 @@ class Adapter:
     body_xpath = "//article | //main"
     #: rough ceiling on reachable articles, for honest logging (see design.md)
     expected_ceiling = None
+    #: True only if discover() returns ONE reverse-chronological run. Adapters
+    #: that concatenate several indexes (CBS tags, AP hubs) are False, because
+    #: the date resets at each index boundary and an early stop keyed on
+    #: "N consecutive old articles" would discard every later index.
+    chronological = True
 
     def discover_url(self, page):
         """URL of the Nth listing page (1-indexed). None => no more pages."""
@@ -282,20 +295,57 @@ class Adapter:
 
 
 class CBSAdapter(Adapter):
-    """PRIMARY. Editorially flood-tagged, paginated, clean <figure> markup."""
+    """PRIMARY. Editorially tagged, genuinely paginated, clean <figure> markup.
+
+    Several flood-adjacent tags are merged for volume. `flooding` and
+    `flash-flooding` are direct; `tropical-storm`, `hurricane`, `landslide` and
+    `severe-weather` are adjacent and frequently carry flood imagery. They are
+    included deliberately and left for `verify.py` to score rather than being
+    dropped at crawl time -- filter on `flood_verified` downstream.
+
+    Tags confirmed to exist (others 404): floods, flood, storms,
+    extreme-weather, natural-disasters, rain, monsoon all return 404.
+    """
     name = "cbs"
     host = "https://www.cbsnews.com"
-    expected_ceiling = 1400
+    expected_ceiling = 2500
     # section.list-river is the true paginated feed. The larger
     # 'view-bulk-component' block is boilerplate repeated on every page.
     body_xpath = "//article | //div[contains(@class,'content__body')] | //main"
+    TAGS = ["flooding", "flash-flooding", "tropical-storm", "hurricane",
+            "landslide", "severe-weather"]
+    chronological = False        # concatenated per-tag runs; see base class
+
+    def _tag_url(self, tag, page):
+        return f"{self.host}/tag/{tag}/" if page == 1 else f"{self.host}/tag/{tag}/{page}/"
 
     def discover_url(self, page):
-        return f"{self.host}/tag/flooding/" if page == 1 else f"{self.host}/tag/flooding/{page}/"
+        return self._tag_url("flooding", page)
 
     def article_links(self, doc):
         hrefs = doc.xpath("//section[contains(@class,'list-river')]//a[contains(@href,'/news/')]/@href")
         return [absolutize(self.host, h.split("?")[0]) for h in hrefs]
+
+    def discover(self, fetch, max_pages, log=print):
+        from lxml import html as lhtml
+        urls = []
+        for tag in self.TAGS:
+            before, empty = len(urls), 0
+            for page in range(1, max_pages + 1):
+                r = fetch(self._tag_url(tag, page))
+                if r is None:
+                    break
+                try:
+                    found = self.article_links(lhtml.fromstring(r.content))
+                except Exception:
+                    found = []
+                urls.extend(u for u in dict.fromkeys(found) if u not in urls)
+                time.sleep(0.35)
+                empty = empty + 1 if not found else 0
+                if empty >= 4:
+                    break
+            log(f"  tag {tag}: +{len(urls) - before} (total {len(urls)})")
+        return urls
 
 
 class APAdapter(Adapter):
@@ -306,9 +356,13 @@ class APAdapter(Adapter):
     expected_ceiling = 30
     body_xpath = "//div[contains(@class,'RichTextStoryBody')] | //bsp-story-page"
 
+    #: AP hubs have no pagination (JS 'load more'), so breadth comes from
+    #: querying several flood-adjacent hubs instead of paging one.
+    HUBS = ["floods", "hurricanes", "climate-and-environment", "severe-weather"]
+    chronological = False        # concatenated per-hub runs
+
     def discover_url(self, page):
-        # The hub has no real pagination (JS 'load more'), so page>1 is empty.
-        return f"{self.host}/hub/floods" if page == 1 else None
+        return f"{self.host}/hub/{self.HUBS[page - 1]}" if page <= len(self.HUBS) else None
 
     def article_links(self, doc):
         out = []

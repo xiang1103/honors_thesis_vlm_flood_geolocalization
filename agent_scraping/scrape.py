@@ -9,7 +9,7 @@ Design rationale + the outlet bake-off that selected CBS: see design.md.
 
 Usage
 -----
-  PY=/home/liu47/miniconda3/bin/python3
+  PY=/home/liu47/conda_envs/newEnv_local/bin/python3
 
   # smoke test (2 listing pages)
   $PY scrape.py --outlet cbs --max-pages 2 --out data/cbs_flood.jsonl
@@ -195,8 +195,9 @@ DATE_RE = re.compile(r"(\d{4})-(\d{2})-(\d{2})")
 
 def parse_date(s):
     """Tolerant ISO-ish date -> datetime(UTC-naive). Outlets emit
-    '2026-08-30T07:04:00-0400' (no colon in offset), which Python 3.9's
-    fromisoformat rejects, so fall back to a plain YYYY-MM-DD match."""
+    '2026-08-30T07:04:00-0400' (no colon in the offset). fromisoformat
+    rejects that on <=3.10 (support landed in 3.11), so fall back to a plain
+    YYYY-MM-DD match. Verified still required on this project's 3.10 env."""
     if not s:
         return None
     try:
@@ -213,25 +214,46 @@ def parse_date(s):
 
 
 def finalize(jsonl_path, json_path, keep_jsonl=False):
-    """Combine the streaming JSONL into one pretty JSON array, then drop the
-    JSONL. JSONL exists only so an interrupted crawl stays valid+resumable;
-    once the crawl finishes it has served its purpose."""
-    recs = []
+    """Merge this run's JSONL into the outlet's JSON, then drop the JSONL.
+
+    MUST merge, not overwrite. With --resume the JSONL holds only the articles
+    fetched *this* run, so rebuilding the JSON from it alone silently destroys
+    everything collected previously. Existing records are loaded first and
+    keyed by url; new ones update or extend them.
+    """
+    by_url = {}
+    if os.path.exists(json_path):
+        try:
+            with open(json_path) as f:
+                for r in json.load(f):
+                    if r.get("url"):
+                        by_url[r["url"]] = ordered(r)
+        except (json.JSONDecodeError, OSError):
+            pass
+    before = len(by_url)
+
     if os.path.exists(jsonl_path):
         with open(jsonl_path) as f:
             for line in f:
                 line = line.strip()
-                if line:
-                    try:
-                        recs.append(ordered(json.loads(line)))
-                    except json.JSONDecodeError:
-                        pass
-    recs.sort(key=lambda r: (r.get("date") or ""), reverse=True)
-    with open(json_path, "w") as f:
+                if not line:
+                    continue
+                try:
+                    r = json.loads(line)
+                except json.JSONDecodeError:
+                    continue
+                if r.get("url"):
+                    by_url[r["url"]] = ordered(r)
+
+    recs = sorted(by_url.values(), key=lambda r: (r.get("date") or ""), reverse=True)
+    tmp = json_path + ".tmp"
+    with open(tmp, "w") as f:
         json.dump(recs, f, ensure_ascii=False, indent=2)
         f.write("\n")
+    os.replace(tmp, json_path)          # atomic: never leave a half-written file
     if not keep_jsonl and os.path.exists(jsonl_path):
         os.remove(jsonl_path)
+    log(f"  finalize: {before} existing + new -> {len(recs)} total")
     return recs
 
 
@@ -320,7 +342,7 @@ def crawl_outlet(name, args):
                 if d and d < cutoff:
                     too_old += 1
                     consecutive_old += 1
-                    if consecutive_old >= args.old_streak:
+                    if adapter.chronological and consecutive_old >= args.old_streak:
                         log(f"{name}: {consecutive_old} consecutive articles older than "
                             f"{args.since_days}d -- stopping early")
                         break
@@ -365,7 +387,7 @@ def main():
     ap.add_argument("--old-streak", type=int, default=40,
                     help="stop an outlet after this many consecutive out-of-window articles")
     ap.add_argument("--data-dir", default=os.path.join(os.path.dirname(
-        os.path.dirname(os.path.abspath(__file__))), "data"))
+        os.path.dirname(os.path.abspath(__file__))), "data", "outlets"))
     ap.add_argument("--delay", type=float, default=0.6, help="seconds between article fetches")
     ap.add_argument("--resume", action="store_true")
     ap.add_argument("--keep-jsonl", action="store_true",

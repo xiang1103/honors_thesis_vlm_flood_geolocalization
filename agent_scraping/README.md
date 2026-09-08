@@ -11,7 +11,7 @@ secondary adapters.
 ## Quick start
 
 ```bash
-PY=/home/liu47/miniconda3/bin/python3   # the default python3 lacks trafilatura
+PY=/home/liu47/conda_envs/newEnv_local/bin/python3   # project env (py3.10, requests+trafilatura+lxml)
 
 # every outlet, last year, capped at 5000/outlet -> data/{outlet}_flood.json
 $PY scrape.py --outlets all --since-days 365 --limit 5000
@@ -29,7 +29,7 @@ $PY scrape.py --outlets all --download-images --image-dir ../data/images
 $PY verify.py ../data/cbs_flood.json
 ```
 
-Each outlet writes **`data/{outlet}_flood.json`** — a single pretty-printed
+Each outlet writes **`data/outlets/{outlet}_flood.json`** — a single pretty-printed
 JSON array, sorted newest-first. The intermediate `.jsonl` is deleted on
 completion (`--keep-jsonl` to retain it).
 
@@ -38,6 +38,7 @@ completion (`--keep-jsonl` to retain it).
 | flag | default | meaning |
 |---|---|---|
 | `--outlets` | `all` | `cbs,fox,ap,nbc,npr,cnn` or `all` |
+| `--data-dir` | `data/outlets` | where the per-outlet JSON files go |
 | `--since-days` | `365` | date window; `0` disables |
 | `--limit` | `5000` | max articles per outlet |
 | `--old-streak` | `40` | stop an outlet after N consecutive out-of-window articles |

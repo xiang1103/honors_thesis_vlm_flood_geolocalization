@@ -12,7 +12,7 @@ matters because a re-scored or hand-edited record can otherwise drift.
 
 Usage
 -----
-  PY=/home/liu47/miniconda3/bin/python3
+  PY=/home/liu47/conda_envs/newEnv_local/bin/python3
 
   $PY export.py ../data/cbs_flood.jsonl                      # -> ../data/cbs_flood.json
   $PY export.py ../data/cbs_flood.jsonl -o ../data/vlm.json --verified-only --min-images 1

@@ -159,9 +159,9 @@ paginate via JavaScript:
 
 | Outlet | Working discovery route | Ceiling | Why capped |
 |---|---|---|---|
-| **CBS** | `/tag/flooding/{N}/` | **~900–1,400** | genuine HTML pagination |
+| **CBS** | 6 tags x `/tag/{tag}/{N}/` | **~2,000+** | genuine HTML pagination |
 | Fox | `api/article-search?searchBy=tags` | ~46 | `offset`/`size` **ignored**, 30/tag |
-| AP | `/hub/floods` | ~27 | deeper paging is JS "load more" |
+| AP | 4 x `/hub/{topic}` | ~80 | deeper paging is JS "load more" |
 | NPR | `/sections/weather/` | ~22 | no flood tag page; keyword-filtered |
 | NBC | `/news/weather` | ~5 | no static flood tag page |
 | CNN | news sitemap (last ~48h) | ~15 | search API rejects all requests |
@@ -179,6 +179,27 @@ Specific dead ends, recorded so they aren't retried:
 
 Consequence: the 5,000-per-outlet cap **never binds**. It is retained as a
 safety valve, not because any outlet approaches it.
+
+## Widening coverage: multiple indexes per outlet
+
+Neither CBS nor AP paginates a *single* flood index deep enough on its own, so
+both query several indexes and merge. CBS tags that exist (all others 404 —
+`floods`, `flood`, `storms`, `extreme-weather`, `natural-disasters`, `rain`,
+`monsoon`):
+
+`flooding`, `flash-flooding`, `tropical-storm`, `hurricane`, `landslide`,
+`severe-weather`
+
+The last four are flood-*adjacent*, not flood-specific. They are included
+deliberately and left for `verify.py` to score rather than filtered at crawl
+time, because hurricane/tropical-storm coverage is dense with flood imagery.
+Filter on `flood_verified` downstream to get the strict subset.
+
+**Ordering hazard (important).** Merging indexes breaks the assumption behind
+`--old-streak`: each tag restarts at the present day, so a "N consecutive
+out-of-window articles" counter would trip on the first tag's old tail and
+discard every later tag. Adapters therefore declare `chronological`; the early
+stop applies only when it is `True`. CBS and AP set it `False`.
 
 ## Date window
 
@@ -217,9 +238,11 @@ heuristic flood scoring  ──►  JSONL (append, resumable)
 
 ## Operational notes
 
-- **Python: `/home/liu47/miniconda3/bin/python3`** — the shell default may
-  resolve to an env without `trafilatura`. Deps: `requests`, `trafilatura`,
-  `lxml` (all already installed; `bs4`/`feedparser` deliberately avoided).
+- **Python: `/home/liu47/conda_envs/newEnv_local/bin/python3`**
+  (`conda activate /home/liu47/conda_envs/newEnv_local`) — Python 3.10.20 with
+  `requests` 2.33.1, `trafilatura` 2.2.0, `lxml` 6.1.3, `lxml_html_clean`.
+  The bare shell `python3` may resolve to an env without `trafilatura`.
+  `bs4`/`feedparser` are deliberately avoided so the dep set stays minimal.
 - **Resumable**: output is JSONL, appended; `--resume` skips URLs already in
   the file. A long crawl can be interrupted safely.
 - **Politeness**: `--delay` (default 1.0s) between article fetches.
