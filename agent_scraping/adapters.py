@@ -9,6 +9,7 @@ primary because its /tag/flooding/ page paginates (~900-1400 articles) and uses
 clean <figure>/<figcaption>; AP and NBC are secondary, lower-volume sources.
 """
 import re
+import time
 from urllib.parse import urljoin, urlparse
 
 # ---------------------------------------------------------------- shared bits
@@ -116,6 +117,98 @@ def caption_for(img):
     return ""
 
 
+# ------------------------------------------------------------------ video
+
+#: iframe hosts that actually carry article video (not ads/analytics)
+VIDEO_IFRAME = re.compile(r"(youtube\.com/embed|youtu\.be|player\.vimeo|"
+                          r"dailymotion\.com/embed|jwplayer|brightcove)", re.I)
+
+
+def _walk_json(o):
+    if isinstance(o, dict):
+        yield o
+        for v in o.values():
+            yield from _walk_json(v)
+    elif isinstance(o, list):
+        for v in o:
+            yield from _walk_json(v)
+
+
+def iso8601_duration_to_seconds(d):
+    """'PT45S' / 'PT1M30S' -> int seconds. None if unparseable."""
+    if not d or not isinstance(d, str):
+        return None
+    m = re.match(r"^P(?:(\d+)D)?T?(?:(\d+)H)?(?:(\d+)M)?(?:(\d+(?:\.\d+)?)S)?$", d.strip())
+    if not m:
+        return None
+    dd, hh, mm, ss = (float(x) if x else 0 for x in m.groups())
+    total = dd * 86400 + hh * 3600 + mm * 60 + ss
+    return int(total) or None
+
+
+def extract_videos(doc, base_url, json_objects):
+    """Article video via four strategies, because outlets differ sharply:
+
+    - JSON-LD ``VideoObject``  -- richest (Fox: name/description/duration/thumb)
+    - ``<video>`` + ``<source>`` -- CBS ships a real media URL here
+    - ``og:video``             -- CBS fallback when <source> is JS-injected
+    - ``<iframe>``             -- YouTube/Vimeo/Brightcove embeds
+
+    Returns [{url, caption, thumbnail, duration_s, source}].
+    """
+    out, seen = [], set()
+
+    def add(url, caption, thumb, dur, src):
+        u = absolutize(base_url, url)
+        if not u or u in seen:
+            return
+        seen.add(u)
+        out.append({"url": u,
+                    "caption": re.sub(r"\s+", " ", (caption or "")).strip(),
+                    "thumbnail": absolutize(base_url, thumb) if thumb else None,
+                    "duration_s": dur,
+                    "source": src})
+
+    # 1. JSON-LD VideoObject
+    for o in json_objects:
+        for node in _walk_json(o):
+            if not isinstance(node, dict):
+                continue
+            if str(node.get("@type", "")).lower() != "videoobject":
+                continue
+            thumb = node.get("thumbnailUrl")
+            if isinstance(thumb, list):
+                thumb = thumb[0] if thumb else None
+            cap = node.get("description") or node.get("name") or ""
+            add(node.get("contentUrl") or node.get("embedUrl") or node.get("url"),
+                cap, thumb, iso8601_duration_to_seconds(node.get("duration")),
+                "jsonld")
+
+    # 2. <video> / <source>
+    for v in doc.xpath("//video"):
+        if is_recirculation(v):
+            continue
+        cap = caption_for(v) or " ".join(
+            t.strip() for t in v.xpath("ancestor::figure[1]//figcaption//text()") if t.strip())
+        poster = v.get("poster")
+        url = v.get("src") or (v.xpath(".//source/@src") or [None])[0]
+        if url:
+            add(url, cap, poster, None, "video")
+
+    # 3. og:video (CBS injects <source> via JS, so this is the reliable one)
+    for m in doc.xpath("//meta[@property='og:video' or @property='og:video:url' "
+                       "or @property='og:video:secure_url']/@content"):
+        desc = doc.xpath("//meta[@property='og:description']/@content")
+        add(m, desc[0] if desc else "", None, None, "og")
+
+    # 4. embeds
+    for f in doc.xpath("//iframe/@src"):
+        if f and VIDEO_IFRAME.search(f):
+            add(f, "", None, None, "iframe")
+
+    return out
+
+
 # ------------------------------------------------------------------- adapters
 
 class Adapter:
@@ -123,14 +216,50 @@ class Adapter:
     host = ""
     #: xpath for images that are genuinely part of the story body
     body_xpath = "//article | //main"
+    #: rough ceiling on reachable articles, for honest logging (see design.md)
+    expected_ceiling = None
 
     def discover_url(self, page):
-        """URL of the Nth listing page (1-indexed)."""
+        """URL of the Nth listing page (1-indexed). None => no more pages."""
         raise NotImplementedError
 
     def article_links(self, doc):
         """Article URLs from a listing page document."""
         raise NotImplementedError
+
+    def videos(self, doc, base_url, json_objects):
+        """[{url, caption, thumbnail, duration_s, source}] for one article."""
+        return extract_videos(doc, base_url, json_objects)
+
+    def discover(self, fetch, max_pages, log=print):
+        """Walk listing pages and return article URLs.
+
+        Overridden by outlets whose index is a JSON API rather than HTML.
+        """
+        from lxml import html as lhtml
+        urls, empty = [], 0
+        for page in range(1, max_pages + 1):
+            listing = self.discover_url(page)
+            if listing is None:
+                break
+            r = fetch(listing)
+            if r is None:
+                log(f"  listing page {page}: unreachable -- stop")
+                break
+            try:
+                found = self.article_links(lhtml.fromstring(r.content))
+            except Exception:
+                found = []
+            new = [u for u in dict.fromkeys(found) if u not in urls]
+            urls.extend(new)
+            if page % 10 == 0 or page <= 3:
+                log(f"  page {page}: +{len(new)} (total {len(urls)})")
+            time.sleep(0.35)          # politeness: 200 listing pages otherwise burst
+            empty = empty + 1 if not found else 0
+            if empty >= 4:
+                log(f"  4 empty pages -- end of feed at page {page}")
+                break
+        return urls
 
     def images(self, doc, base_url):
         """[{url, caption, source}] for one article document."""
@@ -156,6 +285,7 @@ class CBSAdapter(Adapter):
     """PRIMARY. Editorially flood-tagged, paginated, clean <figure> markup."""
     name = "cbs"
     host = "https://www.cbsnews.com"
+    expected_ceiling = 1400
     # section.list-river is the true paginated feed. The larger
     # 'view-bulk-component' block is boilerplate repeated on every page.
     body_xpath = "//article | //div[contains(@class,'content__body')] | //main"
@@ -173,6 +303,7 @@ class APAdapter(Adapter):
     to RichTextStoryBody or recirculation photos leak in (see design.md)."""
     name = "ap"
     host = "https://apnews.com"
+    expected_ceiling = 30
     body_xpath = "//div[contains(@class,'RichTextStoryBody')] | //bsp-story-page"
 
     def discover_url(self, page):
@@ -194,6 +325,7 @@ class NBCAdapter(Adapter):
     """SECONDARY. Clean figures, but the weather section yields few floods."""
     name = "nbc"
     host = "https://www.nbcnews.com"
+    expected_ceiling = 10
     body_xpath = "//article | //div[contains(@class,'article-body')] | //main"
 
     def discover_url(self, page):
@@ -211,7 +343,95 @@ class NBCAdapter(Adapter):
         return out
 
 
-ADAPTERS = {a.name: a for a in (CBSAdapter, APAdapter, NBCAdapter)}
+class FoxAdapter(Adapter):
+    """SECONDARY. Fox's flood list is entirely JS-rendered -- the static
+    category page has ZERO article links. Its internal article-search API works
+    but only with searchBy=tags (categories returns []), and it ignores
+    `offset`/`size`: 30 items is a hard ceiling per tag. Two flood-ish tags are
+    queried and merged to widen coverage slightly."""
+    name = "fox"
+    host = "https://www.foxnews.com"
+    expected_ceiling = 60
+    body_xpath = ("//div[contains(@class,'article-body')] | //article | //main")
+    TAGS = ["fox-news/us/disasters/floods", "fox-news/us/disasters"]
+
+    def discover_url(self, page):
+        return None
+
+    def article_links(self, doc):
+        return []
+
+    def discover(self, fetch, max_pages, log=print):
+        import json as _json
+        urls = []
+        for tag in self.TAGS:
+            u = (f"{self.host}/api/article-search?searchBy=tags"
+                 f"&values={tag}&size=30&offset=0")
+            r = fetch(u)
+            if r is None:
+                continue
+            try:
+                items = _json.loads(r.text)
+            except Exception:
+                items = []
+            got = [i["url"] for i in items
+                   if isinstance(i, dict) and i.get("url", "").startswith("http")]
+            new = [g for g in got if g not in urls]
+            urls.extend(new)
+            log(f"  tag {tag}: +{len(new)} (total {len(urls)})")
+        return urls
+
+
+class NPRAdapter(Adapter):
+    """SECONDARY. No working flood tag page; the weather section is the closest
+    static index, so links are keyword-filtered for flood relevance."""
+    name = "npr"
+    host = "https://www.npr.org"
+    expected_ceiling = 30
+    body_xpath = "//div[@id='storytext'] | //article | //main"
+
+    def discover_url(self, page):
+        return f"{self.host}/sections/weather/" if page == 1 else None
+
+    def article_links(self, doc):
+        out = []
+        for a in doc.xpath("//a[@href]"):
+            h = (a.get("href") or "").split("?")[0]
+            txt = " ".join(a.itertext())
+            if re.search(r"npr\.org/20\d\d/", h) and re.search(
+                    r"flood|deluge|inundat|levee|storm|hurricane|rain", h + " " + txt, re.I):
+                out.append(h)
+        return out
+
+
+class CNNAdapter(Adapter):
+    """SECONDARY, RECENT-ONLY. CNN's search API rejects every request with
+    'missing request id' (an internal header we can't forge), so there is no
+    archive access. The Google-News sitemap is the only static index, and it
+    covers roughly the last 48 hours -- so CNN cannot satisfy a 1-year window."""
+    name = "cnn"
+    host = "https://www.cnn.com"
+    expected_ceiling = 15
+    body_xpath = "//div[contains(@class,'article__content')] | //article | //main"
+
+    def discover_url(self, page):
+        return f"{self.host}/sitemaps/cnn/news.xml" if page == 1 else None
+
+    def article_links(self, doc):
+        out = []
+        for loc in doc.xpath("//*[local-name()='url']"):
+            u = loc.xpath("./*[local-name()='loc']/text()")
+            t = loc.xpath(".//*[local-name()='title']/text()")
+            if not u:
+                continue
+            blob = (u[0] + " " + (t[0] if t else ""))
+            if re.search(r"flood|deluge|inundat|levee|storm surge", blob, re.I):
+                out.append(u[0].split("?")[0])
+        return out
+
+
+ADAPTERS = {a.name: a for a in (CBSAdapter, FoxAdapter, APAdapter,
+                                NBCAdapter, NPRAdapter, CNNAdapter)}
 
 
 def get_adapter(name):

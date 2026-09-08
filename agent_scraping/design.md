@@ -10,11 +10,23 @@ A reproducible dataset of US-outlet flood journalism for a VLM use case:
 
 ```json
 {
-  "url": "str", "outlet": "cbs", "title": "str", "date": "ISO-8601",
+  "title": "str", "outlet": "cbs", "date": "ISO-8601", "url": "str",
   "text": "str",
-  "images": [ { "url": "str", "caption": "str", "source": "figure|lead" } ]
+  "images": [ { "url": "str", "caption": "str", "source": "figure|body" } ],
+  "videos": [ { "url": "str", "caption": "str", "thumbnail": "str",
+                "duration_s": 45, "source": "jsonld|video|og|iframe" } ]
 }
 ```
+
+Key order is fixed by `FIELD_ORDER` in `scrape.py` and applied on write, so
+scoring (which appends fields) can't reorder the human-facing ones.
+
+**Storage format:** JSONL while crawling, then combined into a single
+pretty-printed `data/{outlet}_flood.json` and the JSONL is **deleted**
+(`--keep-jsonl` overrides). JSONL is
+append-per-article and therefore crash-safe and resumable; a JSON array needs
+its closing bracket, so an interrupted crawl would leave a corrupt file.
+`export.py` converts to a plain JSON array once the crawl is done.
 
 The **(image, caption) pair is the product**. A bare image list is worth much
 less — the caption is the supervision signal.
@@ -115,6 +127,70 @@ across title/text/captions, producing `flood_score` + `flood_verified` on every
 record. Records are kept, not dropped, so the threshold stays tunable after the
 fact without re-crawling. If a manual audit later shows the heuristic is
 insufficient, an LLM pass can run **once, over the low-scoring tail only**.
+
+## Video extraction — four strategies, because outlets disagree
+
+Measured on live articles; no single strategy covers both outlets:
+
+| Outlet | `<video>` | `<source>` | `og:video` | JSON-LD `VideoObject` |
+|---|---|---|---|---|
+| CBS | 2 | 1 | 2 | **0** |
+| Fox | 0 | 0 | 0 | **1** (rich) |
+
+So `extract_videos()` tries all four, in descending order of metadata quality:
+
+1. **JSON-LD `VideoObject`** — the richest. Fox supplies `name`,
+   `description`, `contentUrl`, `embedUrl`, `thumbnailUrl`, and an ISO-8601
+   `duration` (`PT45S` -> `duration_s: 45`).
+2. **`<video>` / `<source>`** — CBS ships a real media URL
+   (`qu.cbsnews.com/...`) plus a `poster` used as the thumbnail.
+3. **`og:video`** — CBS fallback, since its `<source>` is often JS-injected.
+4. **`<iframe>`** — YouTube/Vimeo/Brightcove embeds only; ad and analytics
+   iframes are excluded by host allowlist.
+
+Videos run through the same recirculation filter as images, so a promo video
+for a different story is not attributed to this article.
+
+## Outlet ceilings — why only CBS has archive depth
+
+Re-probed when the task widened to "every website". The result is that
+**five of six outlets are structurally capped**, because their archives
+paginate via JavaScript:
+
+| Outlet | Working discovery route | Ceiling | Why capped |
+|---|---|---|---|
+| **CBS** | `/tag/flooding/{N}/` | **~900–1,400** | genuine HTML pagination |
+| Fox | `api/article-search?searchBy=tags` | ~46 | `offset`/`size` **ignored**, 30/tag |
+| AP | `/hub/floods` | ~27 | deeper paging is JS "load more" |
+| NPR | `/sections/weather/` | ~22 | no flood tag page; keyword-filtered |
+| NBC | `/news/weather` | ~5 | no static flood tag page |
+| CNN | news sitemap (last ~48h) | ~15 | search API rejects all requests |
+
+Specific dead ends, recorded so they aren't retried:
+
+- **Fox** `searchBy=categories` returns `[]`; **`searchBy=tags` is required.**
+  `offset` and `size` are both ignored — 30 items is a hard per-tag ceiling, so
+  two tags are merged. Fox's static category page has **zero** article links.
+- **CNN** `search.prod.di.api.cnn.io/content` answers every request with
+  `{"error":"missing request id"}`. Tried `request-id`, `X-Request-ID`,
+  `x-amzn-trace-id`, `x-correlation-id` — all rejected. No archive access.
+- **AP** sitemap index has 230 sub-sitemaps holding **one 2006-era URL each**.
+- **ABC / PBS** — no static flood topic endpoint found (all 404).
+
+Consequence: the 5,000-per-outlet cap **never binds**. It is retained as a
+safety valve, not because any outlet approaches it.
+
+## Date window
+
+`--since-days 365` (default) keeps only articles inside the window. The date
+comes from JSON-LD `datePublished`, falling back to `article:published_time`
+then `<time datetime>`. Parsing is deliberately tolerant: outlets emit
+`2026-08-30T07:04:00-0400` (no colon in the offset), which Python 3.9's
+`datetime.fromisoformat` rejects, so a plain `YYYY-MM-DD` regex is the fallback.
+
+Because listings are broadly reverse-chronological, `--old-streak` (default 40)
+stops an outlet after that many consecutive out-of-window articles rather than
+walking the entire archive.
 
 ## Architecture
 

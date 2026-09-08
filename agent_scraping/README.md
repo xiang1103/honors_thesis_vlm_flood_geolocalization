@@ -13,19 +13,36 @@ secondary adapters.
 ```bash
 PY=/home/liu47/miniconda3/bin/python3   # the default python3 lacks trafilatura
 
-# smoke test
-$PY scrape.py --outlet cbs --max-pages 2 --limit 6 --out ../data/cbs_flood.jsonl
+# every outlet, last year, capped at 5000/outlet -> data/{outlet}_flood.json
+$PY scrape.py --outlets all --since-days 365 --limit 5000
 
-# full crawl -- resumable, safe to Ctrl-C and re-run
-$PY scrape.py --outlet cbs --max-pages 120 --resume --out ../data/cbs_flood.jsonl
+# one outlet
+$PY scrape.py --outlets cbs
 
-# also pull the image files
-$PY scrape.py --outlet cbs --max-pages 120 --resume --download-images \
-    --out ../data/cbs_flood.jsonl --image-dir ../data/images
+# resume an interrupted run
+$PY scrape.py --outlets all --resume
 
-# re-score / audit an existing file (no network, no tokens)
-$PY verify.py ../data/cbs_flood.jsonl
+# also download the image files
+$PY scrape.py --outlets all --download-images --image-dir ../data/images
+
+# audit an existing dataset (no network, no tokens)
+$PY verify.py ../data/cbs_flood.json
 ```
+
+Each outlet writes **`data/{outlet}_flood.json`** — a single pretty-printed
+JSON array, sorted newest-first. The intermediate `.jsonl` is deleted on
+completion (`--keep-jsonl` to retain it).
+
+### Key options
+
+| flag | default | meaning |
+|---|---|---|
+| `--outlets` | `all` | `cbs,fox,ap,nbc,npr,cnn` or `all` |
+| `--since-days` | `365` | date window; `0` disables |
+| `--limit` | `5000` | max articles per outlet |
+| `--old-streak` | `40` | stop an outlet after N consecutive out-of-window articles |
+| `--min-images` | `0` | keep only articles with >= N captioned images |
+| `--keep-jsonl` | off | don't delete the intermediate JSONL |
 
 Dependencies: `requests`, `trafilatura`, `lxml` — all already installed.
 No API key, no headless browser, no `bs4`/`feedparser`.
@@ -37,23 +54,65 @@ No API key, no headless browser, no `bs4`/`feedparser`.
 | `scrape.py` | crawl loop: fetch w/ backoff, parse, score, write JSONL |
 | `adapters.py` | per-outlet discovery + image selection (CBS / AP / NBC) |
 | `verify.py` | zero-token flood scoring; also a standalone audit CLI |
+| `export.py` | filter/convert a dataset (`--verified-only`, `--min-images`) |
 | `design.md` | why CBS, the measurements, and the scope decisions |
 
 ## Output
+
+### Video
+
+Outlets disagree completely on video markup, so four strategies run in
+descending order of metadata quality: JSON-LD `VideoObject` (Fox — gives
+description, thumbnail, `PT45S` duration), `<video>`/`<source>` (CBS — real
+media URL + poster), `og:video` (CBS fallback), and `<iframe>` embeds
+(YouTube/Vimeo/Brightcove only). Measured: CBS exposes 2 `<video>` + 2
+`og:video` and **zero** JSON-LD; Fox exposes **only** JSON-LD.
+
+### Why JSONL during the crawl, plain JSON after
+
+The crawler writes **JSONL** (one object per line, appended and flushed per
+article) because that is the only format that survives interruption: a crash or
+Ctrl-C 900 articles into a 1,400-article run still leaves a valid file, and
+`--resume` works by reading back the URLs already present. A JSON array cannot
+be appended to safely — it needs its closing `]`, so an interrupted write
+produces an unparseable file. It also streams, so memory stays flat.
+
+That reasoning only applies *while crawling*, so the crawl **finalizes
+automatically**: when an outlet finishes, its JSONL is combined into a single
+pretty-printed `data/{outlet}_flood.json` (sorted newest-first) and the JSONL is
+deleted. `export.py` remains for filtering an existing dataset:
+
+```bash
+$PY export.py ../data/cbs_flood.json -o ../data/vlm.json --verified-only --min-images 1
+```
+
+### Field order
+
+Fixed and enforced on write (via `FIELD_ORDER` / `ordered()` in `scrape.py`),
+so re-scoring or hand-editing can't let it drift:
+
+`title, outlet, date, url, text, images, videos, flood_score, flood_verified, scraped_at`
 
 One JSON object per line (JSONL, appended — so a crawl is resumable):
 
 ```json
 {
-  "url": "https://www.cbsnews.com/news/...",
-  "outlet": "cbs",
   "title": "Grand Canyon flash floods leave 2 dead...",
+  "outlet": "cbs",
   "date": "2026-08-30T07:04:00-0400",
+  "url": "https://www.cbsnews.com/news/...",
   "text": "Two deaths have been confirmed after parts of...",
   "images": [
     {"url": "https://assets3.cbsnewsstatic.com/...",
      "caption": "Remnants of stone bridge pylons remain along Bright Angel Creek following a flash flood",
      "source": "figure"}
+  ],
+  "videos": [
+    {"url": "https://www.foxnews.com/video/6404693212112",
+     "caption": "Dramatic video shows several feet of floodwater building up outside the glass doors...",
+     "thumbnail": "https://static.foxnews.com/...",
+     "duration_s": 45,
+     "source": "jsonld"}
   ],
   "flood_score": 1.0,
   "flood_verified": true,
