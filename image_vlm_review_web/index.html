@@ -1,0 +1,122 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="color-scheme" content="dark">
+    <title>Flood image verification results</title>
+    <link rel="stylesheet" href="styles.css">
+  </head>
+  <body>
+    <header class="site-header">
+      <div class="header-copy">
+        <p class="eyebrow">Qwen second-pass verification</p>
+        <h1>Flood image results</h1>
+        <p id="summary" class="lede" aria-live="polite">Loading verification results…</p>
+      </div>
+      <div class="stats" aria-label="Verification summary">
+        <div class="stat stat-total"><span id="totalCount">—</span><small>All results</small></div>
+        <div class="stat stat-yes"><span id="yesCount">—</span><small>Yes</small></div>
+        <div class="stat stat-no"><span id="noCount">—</span><small>No</small></div>
+        <div class="stat"><span id="yesRate">—</span><small>Kept by model</small></div>
+      </div>
+    </header>
+
+    <main>
+      <section class="control-panel" aria-label="Result filters">
+        <div class="answer-filter" role="group" aria-label="Filter by model answer">
+          <button class="answer-button active" type="button" data-answer="all" aria-pressed="true">
+            All <span id="allButtonCount">—</span>
+          </button>
+          <button class="answer-button answer-yes" type="button" data-answer="yes" aria-pressed="false">
+            Yes <span id="yesButtonCount">—</span>
+          </button>
+          <button class="answer-button answer-no" type="button" data-answer="no" aria-pressed="false">
+            No <span id="noButtonCount">—</span>
+          </button>
+        </div>
+
+        <div class="secondary-filters">
+          <label class="search-field">
+            <span>Search</span>
+            <input id="search" type="search" placeholder="Title, caption, or model output">
+          </label>
+          <label>
+            <span>Outlet</span>
+            <select id="outlet"><option value="all">All outlets</option></select>
+          </label>
+          <label>
+            <span>Article check</span>
+            <select id="verification">
+              <option value="all">All articles</option>
+              <option value="verified">Flood verified</option>
+              <option value="unverified">Not verified</option>
+            </select>
+          </label>
+          <label>
+            <span>Sort</span>
+            <select id="sortOrder">
+              <option value="newest">Newest first</option>
+              <option value="oldest">Oldest first</option>
+              <option value="outlet">Outlet A–Z</option>
+            </select>
+          </label>
+        </div>
+      </section>
+
+      <section class="results-heading" aria-live="polite">
+        <div>
+          <p id="resultCount">Loading images…</p>
+          <p class="browser-note">Images load from the original news URLs in your browser; they are not downloaded by this site.</p>
+        </div>
+        <span id="pageStatus"></span>
+      </section>
+
+      <section id="imageGrid" class="image-grid" aria-label="Verified image results"></section>
+      <section id="emptyState" class="empty-state" hidden>
+        <h2>No matching images</h2>
+        <p>Try another answer, outlet, or search term.</p>
+      </section>
+
+      <nav class="pagination" aria-label="Results pages">
+        <button id="previousPage" type="button">← Previous</button>
+        <span id="paginationStatus"></span>
+        <button id="nextPage" type="button">Next →</button>
+      </nav>
+    </main>
+
+    <dialog id="viewer" class="viewer">
+      <button id="closeViewer" class="close-button" type="button" aria-label="Close image viewer">×</button>
+      <div class="viewer-layout">
+        <div class="viewer-media">
+          <img id="viewerImage" alt="">
+          <div id="viewerFallback" class="image-fallback" hidden>
+            <strong>Image could not be loaded</strong>
+            <span>Use the original image link to inspect it.</span>
+          </div>
+          <div class="viewer-navigation">
+            <button id="previousImage" type="button" aria-label="Previous matching image">←</button>
+            <span id="viewerPosition"></span>
+            <button id="nextImage" type="button" aria-label="Next matching image">→</button>
+          </div>
+        </div>
+        <article class="viewer-details">
+          <div id="viewerBadges" class="badges"></div>
+          <h2 id="viewerTitle"></h2>
+          <p id="viewerCaption" class="viewer-caption"></p>
+          <section class="model-response">
+            <span>Raw Qwen response</span>
+            <p id="viewerModelOutput"></p>
+          </section>
+          <dl id="viewerMetadata"></dl>
+          <div class="viewer-links">
+            <a id="viewerArticleLink" target="_blank" rel="noopener noreferrer">Open article ↗</a>
+            <a id="viewerImageLink" target="_blank" rel="noopener noreferrer">Open original image ↗</a>
+          </div>
+        </article>
+      </div>
+    </dialog>
+
+    <script src="app.js"></script>
+  </body>
+</html>

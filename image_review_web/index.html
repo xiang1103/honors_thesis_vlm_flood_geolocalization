@@ -1,0 +1,110 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="description" content="Local review interface for flood-news image references">
+    <title>Flood imagery review</title>
+    <link rel="stylesheet" href="styles.css">
+  </head>
+  <body>
+    <header class="topbar">
+      <div>
+        <p class="eyebrow">VLM flooding dataset</p>
+        <h1>Image review</h1>
+      </div>
+      <div class="summary" id="summary" aria-live="polite">Loading catalog…</div>
+    </header>
+
+    <main>
+      <section class="controls" aria-label="Image filters">
+        <label class="search-field">
+          <span>Search title or caption</span>
+          <input id="search" type="search" placeholder="e.g. Grand Canyon, submerged car">
+        </label>
+        <label>
+          <span>Outlet</span>
+          <select id="outlet"><option value="all">All outlets</option></select>
+        </label>
+        <label>
+          <span>Article check</span>
+          <select id="verification">
+            <option value="all">All records</option>
+            <option value="verified">Flood-verified</option>
+            <option value="unverified">Not verified</option>
+          </select>
+        </label>
+        <label>
+          <span>Visual hint</span>
+          <select id="visualHint">
+            <option value="all">Everything</option>
+            <option value="candidate">Likely photo candidates</option>
+            <option value="suspect">Maps / file-photo hints</option>
+            <option value="duplicate">Repeated image URLs</option>
+          </select>
+        </label>
+        <label>
+          <span>My review</span>
+          <select id="reviewFilter">
+            <option value="all">All decisions</option>
+            <option value="unreviewed">Unreviewed</option>
+            <option value="useful">Useful</option>
+            <option value="reject">Reject</option>
+            <option value="unsure">Unsure</option>
+          </select>
+        </label>
+        <button class="secondary" id="exportReviews" type="button">Export decisions</button>
+      </section>
+
+      <section class="result-bar">
+        <p id="resultCount" aria-live="polite"></p>
+        <div class="pagination" aria-label="Pagination">
+          <button id="previousPage" type="button" aria-label="Previous page">←</button>
+          <span id="pageStatus"></span>
+          <button id="nextPage" type="button" aria-label="Next page">→</button>
+        </div>
+      </section>
+
+      <section class="image-grid" id="imageGrid" aria-live="polite"></section>
+      <section class="empty-state" id="emptyState" hidden>
+        <h2>No images match these filters</h2>
+        <p>Try widening the outlet, article, or review selection.</p>
+      </section>
+    </main>
+
+    <dialog id="viewer">
+      <div class="viewer-shell">
+        <button class="viewer-close" id="closeViewer" type="button" aria-label="Close image viewer">×</button>
+        <div class="viewer-image-wrap">
+          <img id="viewerImage" alt="">
+          <div class="image-fallback" id="viewerFallback" hidden>
+            <strong>Image could not be loaded</strong>
+            <span>The publisher may block direct image loading or the URL may have expired.</span>
+          </div>
+        </div>
+        <aside class="viewer-details">
+          <div class="viewer-nav">
+            <button id="previousImage" type="button">← Previous</button>
+            <span id="viewerPosition"></span>
+            <button id="nextImage" type="button">Next →</button>
+          </div>
+          <div id="viewerBadges" class="badges"></div>
+          <h2 id="viewerTitle"></h2>
+          <p id="viewerCaption" class="viewer-caption"></p>
+          <dl id="viewerMetadata"></dl>
+          <div class="link-row">
+            <a id="viewerArticleLink" target="_blank" rel="noopener noreferrer">Open article ↗</a>
+            <a id="viewerImageLink" target="_blank" rel="noopener noreferrer">Open original image ↗</a>
+          </div>
+          <div class="review-panel">
+            <p>Is this useful for flood geolocation?</p>
+            <div id="viewerReviewButtons" class="review-buttons"></div>
+            <small>Keyboard: 1 useful · 2 reject · 3 unsure · ←/→ navigate</small>
+          </div>
+        </aside>
+      </div>
+    </dialog>
+
+    <script src="app.js"></script>
+  </body>
+</html>
