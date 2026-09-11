@@ -1,7 +1,7 @@
 # Agent Scraping — Direct Outlet Scraper (24 outlets)
 
 Design + rationale for the direct-from-outlet flood dataset scraper.
-Complements `../scraping_api/` (GDELT-API-based discovery). Read this before
+Complements `api_based_scraping/` (GDELT-API-based discovery). Read this before
 changing the pipeline so the measurements below aren't re-derived.
 
 ## Goal
@@ -53,7 +53,7 @@ All 8 candidates returned **HTTP 200 with real content**:
 | AP  | 200 | — | — | 0 | 0 |
 | CNN | 200 | 4.3M | 1,048 | 0 | 0 |
 
-> Note: `../scraping_api/design.md` records "a `requests` fetch of a CNN flood
+> Note: `api_based_scraping/news_api_design.md` records "a `requests` fetch of a CNN flood
 > URL returns nothing." That did **not** reproduce here — CNN returned 4.3MB.
 > The old finding may have been a UA-less request or a transient block. Bot
 > walls were therefore *not* the deciding factor; **discovery volume** was.
@@ -92,7 +92,7 @@ Yields are close; **CBS wins on volume, precision, and markup cleanliness.**
    **zero cross-page overlap** (verified pages 1,2,3,4,10,90). ≈900–1,400 articles.
 2. **Precision** — the tag page is **editorially** flood-tagged. No keyword
    matching, so no "flood of demand" false positives (the exact failure that
-   forced `../scraping_api/` onto GDELT's `NATURAL_DISASTER_FLOOD` theme).
+   forced `api_based_scraping/` onto GDELT's `NATURAL_DISASTER_FLOOD` theme).
 3. **Markup** — standard `<figure>`/`<figcaption>`. Captions are real prose:
    *"An aerial view of the extensive destruction and debris deposits along the
    Trishuli River."*
@@ -110,7 +110,7 @@ flood article yielded photos of a Trump indictment, TSA lines, and Michigan
 whitefish. Genuine photos sit in `div.RichTextStoryBody`; promos sit under
 `PagePromo` / `PageList-items` / `HamburgerNavigation`. The extractor filters
 by ancestor class. This mirrors the recirculation-thumbnail problem already
-documented in `../scraping_api/design.md`.
+documented in `api_based_scraping/news_api_design.md`.
 
 ## Do we need Claude agents to verify "is this actually flooding"?
 
@@ -535,7 +535,7 @@ heuristic flood scoring  ──►  JSONL (append, resumable)
 ## Deliberate scope limits
 
 - **Static HTML only.** No lazy-loaded (`data-src`-only), JS-rendered, or CSS
-  `background-image` assets. Same call as `../scraping_api/`.
+  `background-image` assets. Same call as `api_based_scraping/`.
 - **Bot blocks / 403 / 404 are logged and skipped**, never fatal (per task).
 - **Images are referenced by URL by default**; `--download-images` optionally
   fetches bytes. Keeps the repo small and the crawl fast.

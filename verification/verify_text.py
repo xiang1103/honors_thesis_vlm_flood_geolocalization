@@ -21,7 +21,7 @@ WEAK = re.compile(
     r"river|dam|creek|levee|rescue|submerged|washed\s+out|mudslide|landslide)\b", re.I)
 
 # "a flood of X" -- the metaphor that produced false positives for the
-# keyword-based approach in ../scraping_api/ (e.g. "flood of demand").
+# keyword-based approach in ../scraping/api_based_scraping/ (e.g. "flood of demand").
 METAPHOR = re.compile(
     r"\bflood(ed|ing)?\s+of\s+(demand|orders|calls|messages|applications|"
     r"immigrants|migrants|money|cash|tears|memories|complaints|requests)\b", re.I)

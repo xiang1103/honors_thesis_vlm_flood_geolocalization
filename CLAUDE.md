@@ -22,7 +22,8 @@ disk pressure without checking the absolute number first.
 ## Layout
 
 ```
-agent_scraping/   crawling only        scrape.py, adapters.py, run_crawl.sh, design.md
+scraping/         crawling only        scrape.py, adapters.py, run_crawl.sh, design.md
+  api_based_scraping/   superseded GDELT approach: news_scrape.py + news_api_design.md
 verification/     judging only         verify_text.py, verify_images_vlm.py, dedupe.py
 local_vlm/        model mechanics      backend.py, download_model.py
 image_review_web/       + image_review_server.py       human review site  :8765
@@ -32,7 +33,7 @@ data/outlets/     empty except for transient <outlet>_flood.jsonl DURING a crawl
                   Recreated by makedirs; gitignored, so absent in a fresh clone.
 ```
 
-`agent_scraping/design.md` is the outlet bake-off record: which outlets were
+`scraping/design.md` is the outlet bake-off record: which outlets were
 tested, which were rejected and why, and postmortems of real bugs. Read it
 before touching `adapters.py` or adding an outlet.
 
@@ -40,8 +41,8 @@ before touching `adapters.py` or adding an outlet.
 
 ```bash
 # crawl
-python3 agent_scraping/scrape.py --outlets all --resume
-python3 agent_scraping/scrape.py --list-outlets
+python3 scraping/scrape.py --outlets all --resume
+python3 scraping/scrape.py --list-outlets
 
 # classify images (local GPU, free, default backend)
 python3 local_vlm/download_model.py                        # one time, 55.6 GB
@@ -58,7 +59,7 @@ python3 image_review_server.py          # :8765 human labelling, reads the corpu
 python3 image_vlm_review_server.py      # :8766 model results, reads final.json
 ```
 
-Long crawls: `./agent_scraping/run_crawl.sh` (tmux, survives disconnect).
+Long crawls: `./scraping/run_crawl.sh` (tmux, survives disconnect).
 
 ## Data flow
 
@@ -174,8 +175,11 @@ blocks and takes the LAST match. Thinking off is also ~10x faster
   key. There is no server-side copy.
 - **Line endings.** Files written on Windows land as CRLF and flap the whole
   diff when rewritten here. Consider `*.json text eol=lf` in `.gitattributes`.
-- **`scraping_api/`** is the superseded GDELT-based approach and has its own
-  `CLAUDE.md`. Ignore it; this file supersedes it.
+- **`scraping/api_based_scraping/`** is the superseded GDELT-discovery
+  approach. Its design notes are in `news_api_design.md` (formerly a nested
+  `CLAUDE.md`, renamed so it stops being read as agent instructions). The
+  reasoning on why no news API returns inline images is still worth reading;
+  the code is not in use.
 
 ## State (2026-09-11)
 

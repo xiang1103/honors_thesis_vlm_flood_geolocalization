@@ -10,7 +10,7 @@ scrape ──► data/news_scrape_results.json ──► VLM verify ──► da
 ```
 
 ```
-agent_scraping/   crawl news outlets  -> data/news_scrape_results.json 
+scraping/   crawl news outlets  -> data/news_scrape_results.json 
 
 verification/     verify_text.py (keyword scoring) to filter out non-flood relevant reports, verify_images_vlm.py to check for non-relevant images, dedupe.py to check duplicate images  
 
@@ -29,9 +29,9 @@ load all collected news (news_scrape_results.json) ──► write new scrpapes 
 ```
 
 ```bash
-python3 agent_scraping/scrape.py --outlets all --resume
-python3 agent_scraping/scrape.py --outlets guardian,cna --resume   # some outlets
-python3 agent_scraping/scrape.py --list-outlets                    # 29 outlets + expected volume
+python3 scraping/scrape.py --outlets all --resume
+python3 scraping/scrape.py --outlets guardian,cna --resume   # some outlets
+python3 scraping/scrape.py --list-outlets                    # 29 outlets + expected volume
 ```
 
 

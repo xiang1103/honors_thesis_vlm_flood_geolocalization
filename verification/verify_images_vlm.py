@@ -128,7 +128,7 @@ def parse_args() -> argparse.Namespace:
         "--corpus",
         type=Path,
         default=project_root / "data" / "news_scrape_results.json",
-        help="The corpus written by agent_scraping/scrape.py "
+        help="The corpus written by scraping/scrape.py "
              "(default: data/news_scrape_results.json).",
     )
     parser.add_argument(
@@ -585,7 +585,7 @@ def main() -> int:
     if not args.corpus.is_file():
         raise SystemExit(
             f"No corpus at {args.corpus}. It is written by the crawl:\n"
-            f"  python3 agent_scraping/scrape.py --outlets all --resume"
+            f"  python3 scraping/scrape.py --outlets all --resume"
         )
     occurrences = list(iter_image_occurrences(args.corpus))
     completed, url_cache, off_prompt = read_existing_results(

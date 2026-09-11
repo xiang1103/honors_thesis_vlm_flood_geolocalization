@@ -5,7 +5,7 @@
     vlm = LocalVLM(DEFAULT_MODEL_PATH)
     vlm.classify(url, prompt)     # -> {"status": "completed", "answer": "yes", ...}
 
-Kept separate from agent_scraping/ so the scraping pipeline stays free of
+Kept separate from scraping/ so the scraping pipeline stays free of
 torch/CUDA imports: nothing here is loaded unless local inference is asked for.
 """
 from .backend import DEFAULT_MAX_PIXELS, LocalVLM

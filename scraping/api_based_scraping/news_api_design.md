@@ -1,7 +1,17 @@
-# Flood News Scraping — Design & Decisions
+# API-based scraping — design & decisions
 
-Context and rationale for the flood-news dataset scraper (`news_scrape.py`).
-Read this before changing the pipeline so the reasoning isn't re-derived.
+The GDELT-discovery approach (`news_scrape.py`). **Superseded** by the direct
+outlet scraper in the parent directory (`scrape.py` + `adapters.py`), which
+discovers articles from each outlet's own flood index rather than a news API
+and yields far more captioned images. Kept because the reasoning below still
+holds and should not be re-derived — especially why no news API can supply
+inline images, and the image failure taxonomy.
+
+Was `scraping_api/CLAUDE.md`. Renamed and merged here so it reads as
+documentation rather than agent instructions; the root `CLAUDE.md` describes
+the pipeline actually in use.
+
+---
 
 ## Goal
 
@@ -190,4 +200,44 @@ finding that these sources mostly expose one lead image statically.
 - [ ] (Optional) migrate the flat `image_links` to `{url, caption, source}`
       objects if the caption-per-image pairing is wanted for *all* images, not
       just the gallery subset.
+```
+
+
+---
+
+# Appendix: the original planning sketch
+
+The first design note, written before the GDELT implementation. Kept for the
+source shortlist and the extraction failure modes it anticipated.
+
+## Sources to scrape: 
+- GDELT (news + image API) 
+- API for news: NewsAPI.org, GNews, Mediastack 
+- RSS sites (AP News, Reuters, BBC) 
+- The Guardian (open API) 
+- local small newspaper sites which are easier to scrape 
+
+
+## Extract News (per-site) 
+- trafilatura + newspaper3k 
+
+
+### Failure models of extraction 
+- gallery, carousel view images are not captured 
+    - don't worry about non-static (JS-rendering), lazily loaded images
+- failed to extract the captions for each image 
+
+## Dataset 
+```  
+{
+        [
+            {
+                title: str, 
+                date: str, 
+                all_text: str,  
+                image_links:[] 
+            }
+
+        ]
+    }
 ```
