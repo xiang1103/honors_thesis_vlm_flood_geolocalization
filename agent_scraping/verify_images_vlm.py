@@ -45,6 +45,56 @@ FATAL_HTTP_CODES = {401, 402, 403}
 TRANSIENT_HTTP_CODES = {408, 409, 425, 429, 500, 502, 503, 504}
 
 
+def load_env_file(path: Path) -> int:
+    """Read KEY=VALUE lines from a .env into os.environ. Returns how many were set.
+
+    Deliberately does NOT overwrite a variable that is already exported: a shell
+    that has HF_TOKEN set is being explicit, and should win over a file that may
+    be stale. Missing file is not an error -- the .env is one of three ways to
+    supply the token, not a requirement.
+
+    No dependency on python-dotenv; this is the whole format that matters here.
+    """
+    if not path.is_file():
+        return 0
+    loaded = 0
+    for raw_line in path.read_text(encoding="utf-8").splitlines():
+        line = raw_line.strip()
+        if not line or line.startswith("#"):
+            continue
+        if line.startswith("export "):
+            line = line[len("export "):].lstrip()
+        key, separator, value = line.partition("=")
+        if not separator:
+            continue
+        key = key.strip()
+        value = value.strip()
+        if len(value) >= 2 and value[0] == value[-1] and value[0] in "\"'":
+            value = value[1:-1]          # strip matching quotes, keep inner ones
+        if key and key not in os.environ:
+            os.environ[key] = value
+            loaded += 1
+    return loaded
+
+
+def resolve_token(env_file: Path) -> tuple[str, str]:
+    """HF token plus a description of where it came from, for the run log.
+
+    Order: an exported HF_TOKEN, then the .env, then an interactive prompt.
+    The token itself is never printed.
+    """
+    token = os.environ.get("HF_TOKEN")
+    if token:
+        return token, "the HF_TOKEN environment variable"
+
+    if load_env_file(env_file):
+        token = os.environ.get("HF_TOKEN")
+        if token:
+            return token, f"{env_file}"
+
+    return getpass.getpass("HF token: "), "the interactive prompt"
+
+
 def parse_args() -> argparse.Namespace:
     project_root = Path(__file__).resolve().parents[1]
     parser = argparse.ArgumentParser(
@@ -69,6 +119,13 @@ def parse_args() -> argparse.Namespace:
         default=project_root / "data" / "image_vlm_verification_final.json",
         help="Canonical JSON with the latest valid result for each occurrence. "
              "This is the resumable store of record.",
+    )
+    parser.add_argument(
+        "--env-file",
+        type=Path,
+        default=project_root / ".env",
+        help="File to read HF_TOKEN from when it is not already exported "
+             "(default: the project root .env). Ignored if missing.",
     )
     parser.add_argument(
         "--keep-jsonl",
@@ -463,9 +520,10 @@ def main() -> int:
         print(f"Summary: {summary}")
         return 0
 
-    token = os.environ.get("HF_TOKEN") or getpass.getpass("HF token: ")
+    token, token_source = resolve_token(args.env_file)
     if not token:
         raise SystemExit("No Hugging Face token supplied.")
+    print(f"Using HF token from {token_source}.")
 
     counts = {"yes": 0, "no": 0, "invalid_output": 0, "error": 0}
     written = 0

@@ -106,16 +106,29 @@ python -m pip install --upgrade huggingface_hub
 Do not paste the token into Python code, a README, or a committed configuration
 file.
 
-The simplest option is to leave `HF_TOKEN` unset. The script will securely ask
-for `HF token:` when it begins making API calls; the pasted text is not shown
-on screen.
+The token is looked up in three places, in this order. The first one that has
+it wins, and the token itself is never printed -- only where it came from.
 
-Alternatively, set it only for the current PowerShell window without writing
-the token into the command history:
+1. **An exported `HF_TOKEN`.** Set it for the current PowerShell window only,
+   without writing it into the command history:
 
-```powershell
-$env:HF_TOKEN = Read-Host "HF token"
-```
+   ```powershell
+   $env:HF_TOKEN = Read-Host "HF token"
+   ```
+
+2. **A `.env` file** in the project root (gitignored). Copy `.env.example`:
+
+   ```text
+   HF_TOKEN=hf_your_token_here
+   ```
+
+   Use `--env-file PATH` to read a different one. A missing file is not an
+   error. Variables already exported are never overwritten, so an explicit
+   shell setting always beats a possibly stale file.
+
+3. **An interactive prompt.** Leave `HF_TOKEN` unset and skip the `.env`; the
+   script asks for `HF token:` when it begins making API calls, and the pasted
+   text is not shown on screen.
 
 The token needs permission to call Hugging Face inference providers. API calls
 may consume provider credits, depending on the account and provider.
