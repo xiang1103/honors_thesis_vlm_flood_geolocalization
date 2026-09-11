@@ -3,7 +3,6 @@
 Collect flood news articles with captioned images from 29 news outlets, then
 filter the images down to usable street-level photographs — by model and by eye.
 
-
 ```
 scrape ──► data/news_scrape_results.json ──► VLM verify ──► data/image_vlm_verification_final.json
                     (the corpus)                                          │
@@ -23,9 +22,11 @@ image_vlm_verification_final.json: all scraped with images and model-decisions o
 ```
 
 
-## 1. Scrape
-
-Load large corpus once → build seen-set → compare during crawl → write back centrally to a corpus → guard the write from new jsonl into the main corpus.
+## 1. Scrape 
+Scraping process: 
+```
+load all collected news (news_scrape_results.json) ──► write new scrpapes to per_outlet.jsonl ──► merge these jsonl into the main corpus
+```
 
 ```bash
 python3 agent_scraping/scrape.py --outlets all --resume
