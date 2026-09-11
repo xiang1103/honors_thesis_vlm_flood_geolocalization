@@ -15,6 +15,7 @@ written to disk.
 """
 from __future__ import annotations
 
+import hashlib
 import io
 import re
 import threading
@@ -33,6 +34,32 @@ ANSWER_RE = re.compile(r"\b(yes|no)\b", re.IGNORECASE)
 #: and every result came back a confident, meaningless "yes".
 THINK_BLOCK_RE = re.compile(r"<think>.*?</think>", re.DOTALL | re.IGNORECASE)
 UNTERMINATED_THINK_RE = re.compile(r"<think>.*\Z", re.DOTALL | re.IGNORECASE)
+
+
+def image_digests(image) -> dict[str, str]:
+    """Content fingerprints for one decoded image.
+
+    `image_sha256` hashes the raw RGB pixel buffer, so it is identical only for
+    byte-identical pictures -- the same file served from two URLs. It is
+    deliberately NOT a hash of the response body: that would differ for the
+    same image re-encoded at a different quality.
+
+    `image_dhash` is a 64-bit difference hash (resize to 9x8 grey, compare
+    horizontally adjacent pixels). Close images give close hashes, so Hamming
+    distance finds re-crops and resizes that sha256 cannot. Stored, never
+    acted on automatically -- near-duplicate is a judgement, not a fact.
+    """
+    sha = hashlib.sha256(image.tobytes()).hexdigest()
+
+    small = image.convert("L").resize((9, 8))
+    pixels = list(small.getdata())
+    bits = 0
+    for row in range(8):
+        for col in range(8):
+            left = pixels[row * 9 + col]
+            right = pixels[row * 9 + col + 1]
+            bits = (bits << 1) | int(left > right)
+    return {"image_sha256": sha, "image_dhash": f"{bits:016x}"}
 
 
 def parse_answer(text: str) -> str | None:
@@ -135,15 +162,15 @@ class LocalVLM:
 
     # -- image ------------------------------------------------------------
     def fetch_image(self, url: str):
-        """URL -> RGB PIL image, in memory. Raises on failure."""
+        """URL -> (RGB PIL image, digests). Raises on failure."""
         from PIL import Image
 
         response = self._session.get(
             url, headers=FETCH_HEADERS, timeout=self.fetch_timeout
         )
         response.raise_for_status()
-        image = Image.open(io.BytesIO(response.content))
-        return image.convert("RGB")
+        image = Image.open(io.BytesIO(response.content)).convert("RGB")
+        return image, image_digests(image)
 
     # -- inference --------------------------------------------------------
     def _generate(self, image, prompt: str) -> str:
@@ -192,7 +219,7 @@ class LocalVLM:
 
         for attempt in range(1, retries + 1):
             try:
-                image = self.fetch_image(image_url)
+                image, digests = self.fetch_image(image_url)
             except Exception as exc:
                 # A dead or blocked image URL is permanent for this image and
                 # unrelated to the model, so do not burn every retry on it.
@@ -222,6 +249,7 @@ class LocalVLM:
                     "answer": answer,
                     "model_output": text,
                     "attempts": attempt,
+                    **digests,
                 }
             if attempt < retries:
                 time.sleep(min(2 ** (attempt - 1), 4))
