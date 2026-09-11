@@ -45,8 +45,12 @@ sys.path.insert(0, _HERE)
 # crawling one. The crawl still calls it inline, per-article, as it always did.
 sys.path.insert(0, os.path.join(os.path.dirname(_HERE), "verification"))
 from adapters import ADAPTERS, IMAGE_OUTLETS, get_adapter   # noqa: E402
-from combine_outlets import combine, DEFAULT_DEST            # noqa: E402
 from verify_text import score_record       # noqa: E402
+
+#: The one file every outlet's crawl merges into. Per-outlet JSONs are gone:
+#: the JSONL is still per-outlet (crash safety during a run) but it is merged
+#: straight into this corpus, which is also what --resume reads.
+DEFAULT_CORPUS = Path(__file__).resolve().parents[1] / "data" / "news_scrape_results.json"
 
 #: Canonical key order for every emitted record. Human-facing fields first
 #: (title/outlet/date), then the payload, then machine metadata. Python dicts
@@ -244,23 +248,36 @@ def parse_date(s):
     return None
 
 
-def finalize(jsonl_path, json_path, keep_jsonl=False):
-    """Merge this run's JSONL into the outlet's JSON, then drop the JSONL.
+def finalize(jsonl_path, corpus_path, keep_jsonl=False):
+    """Merge this run's JSONL into the corpus, then drop the JSONL.
 
     MUST merge, not overwrite. With --resume the JSONL holds only the articles
-    fetched *this* run, so rebuilding the JSON from it alone silently destroys
-    everything collected previously. Existing records are loaded first and
-    keyed by url; new ones update or extend them.
+    fetched *this* run, so rebuilding the corpus from it alone silently
+    destroys everything collected previously. Existing records are loaded
+    first and keyed by url; new ones update or extend them.
+
+    A failed read of an EXISTING corpus raises instead of being swallowed.
+    That swallow used to be `except: pass`, which left the record dict empty
+    and then wrote this run's handful of articles over the whole corpus --
+    no exception, no warning, exit code 0. `os.path.exists` has already
+    established the file is there, so a read failure at this point is a real
+    anomaly, never the ordinary "no corpus yet" case.
     """
     by_url = {}
-    if os.path.exists(json_path):
+    if os.path.exists(corpus_path):
         try:
-            with open(json_path) as f:
-                for r in json.load(f):
-                    if r.get("url"):
-                        by_url[r["url"]] = ordered(r)
-        except (json.JSONDecodeError, OSError):
-            pass
+            with open(corpus_path) as f:
+                existing = json.load(f)
+        except (json.JSONDecodeError, OSError) as exc:
+            raise RuntimeError(
+                f"{corpus_path} exists but could not be read ({exc}). Refusing "
+                f"to continue: writing now would replace the corpus with this "
+                f"run's records alone. {jsonl_path} is kept -- fix or move the "
+                f"corpus and re-run."
+            ) from exc
+        for r in existing:
+            if r.get("url"):
+                by_url[r["url"]] = ordered(r)
     before = len(by_url)
 
     if os.path.exists(jsonl_path):
@@ -277,15 +294,55 @@ def finalize(jsonl_path, json_path, keep_jsonl=False):
                     by_url[r["url"]] = ordered(r)
 
     recs = sorted(by_url.values(), key=lambda r: (r.get("date") or ""), reverse=True)
-    tmp = json_path + ".tmp"
-    with open(tmp, "w") as f:
-        json.dump(recs, f, ensure_ascii=False, indent=2)
-        f.write("\n")
-    os.replace(tmp, json_path)          # atomic: never leave a half-written file
+    tmp = corpus_path + ".tmp"
+    try:
+        with open(tmp, "w") as f:
+            json.dump(recs, f, ensure_ascii=False, indent=2)
+            f.write("\n")
+            f.flush()
+            os.fsync(f.fileno())   # publish durable bytes, not page-cache bytes
+        os.replace(tmp, corpus_path)    # atomic: old complete file, or new one
+    except OSError as exc:
+        # The corpus is untouched -- os.replace never ran -- but the partial
+        # tmp would otherwise sit there consuming space.
+        if os.path.exists(tmp):
+            try:
+                os.remove(tmp)
+            except OSError:
+                pass
+        raise RuntimeError(
+            f"could not write {corpus_path} ({exc}). The existing corpus and "
+            f"{jsonl_path} are untouched; free space and re-run."
+        ) from exc
     if not keep_jsonl and os.path.exists(jsonl_path):
-        os.remove(jsonl_path)
+        os.remove(jsonl_path)           # only after the rename succeeded
     log(f"  finalize: {before} existing + new -> {len(recs)} total")
     return recs
+
+
+def load_corpus_urls(corpus_path):
+    """Every article URL already in the corpus, for --resume.
+
+    Loaded ONCE per crawl and shared by every outlet. Loading it inside
+    crawl_outlet() instead would re-parse the whole corpus 29 times a run
+    (~8.7s vs ~0.3s measured); the set itself is O(1) to probe at any size.
+
+    Staleness across outlets is not a correctness problem: article URLs are
+    per-publisher, so outlet B never needs URLs outlet A added this run, and
+    each outlet additionally unions in its own JSONL.
+    """
+    if not os.path.exists(corpus_path):
+        return set()
+    try:
+        with open(corpus_path) as f:
+            return {r["url"] for r in json.load(f) if r.get("url")}
+    except (json.JSONDecodeError, OSError) as exc:
+        # Same reasoning as finalize(): the file exists, so a read failure is
+        # an anomaly. Continuing would silently re-crawl everything.
+        raise RuntimeError(
+            f"{corpus_path} exists but could not be read ({exc}). Refusing to "
+            f"continue: --resume would re-fetch every article already collected."
+        ) from exc
 
 
 def load_seen(path):
@@ -322,22 +379,23 @@ def download_images(rec, image_dir, session):
         im["local_path"] = dest
 
 
-def crawl_outlet(name, args):
-    """Crawl one outlet -> data/{outlet}_flood.json. Returns summary dict."""
+def crawl_outlet(name, args, corpus_urls=frozenset()):
+    """Crawl one outlet into the corpus. Returns summary dict.
+
+    The per-outlet JSONL is still this run's first stop -- appended and flushed
+    per article, so a kill mid-outlet loses nothing -- but it now merges
+    straight into the single corpus rather than a per-outlet JSON.
+    """
     adapter = get_adapter(name)
-    json_path = os.path.join(args.data_dir, f"{name}_flood.json")
+    corpus_path = str(args.corpus)
     jsonl_path = os.path.join(args.data_dir, f"{name}_flood.jsonl")
 
-    # resume reads the JSONL if a previous run was interrupted, else the JSON
+    # resume: the corpus (loaded once, passed in) plus this outlet's own JSONL
+    # if a previous run was interrupted before it could be merged.
     seen = set()
     if args.resume:
         seen |= load_seen(jsonl_path)
-        if os.path.exists(json_path):
-            try:
-                with open(json_path) as f:
-                    seen |= {r["url"] for r in json.load(f) if r.get("url")}
-            except Exception:
-                pass
+        seen |= corpus_urls
         if seen:
             log(f"resume: {len(seen)} URLs already collected for {name}")
 
@@ -396,14 +454,18 @@ def crawl_outlet(name, args):
                     f"vid={len(rec['videos'])} {(rec['title'] or '')[:44]}")
             time.sleep(args.delay)
 
-    recs = finalize(jsonl_path, json_path, keep_jsonl=args.keep_jsonl)
+    corpus = finalize(jsonl_path, corpus_path, keep_jsonl=args.keep_jsonl)
+    # finalize returns the WHOLE corpus now, so the per-outlet summary has to
+    # select this outlet's records rather than counting everything.
+    recs = [r for r in corpus if r.get("outlet") == name]
     nimg = sum(len(r.get("images") or []) for r in recs)
     nvid = sum(len(r.get("videos") or []) for r in recs)
     nver = sum(1 for r in recs if r.get("flood_verified"))
-    log(f"{name}: {len(recs)} records -> {json_path}  "
+    log(f"{name}: {len(recs)} records ({len(corpus)} in corpus) -> {corpus_path}  "
         f"(images={nimg} videos={nvid} verified={nver} old_skipped={too_old} failed={failed})")
     return {"outlet": name, "records": len(recs), "images": nimg, "videos": nvid,
-            "verified": nver, "too_old": too_old, "failed": failed, "path": json_path}
+            "verified": nver, "too_old": too_old, "failed": failed,
+            "path": corpus_path}
 
 
 def main():
@@ -430,11 +492,9 @@ def main():
     ap.add_argument("--download-images", action="store_true")
     ap.add_argument("--image-dir", default=None)
     ap.add_argument("--min-images", type=int, default=0)
-    ap.add_argument("--corpus", type=Path, default=DEFAULT_DEST,
-                    help="combined corpus written after the crawl "
+    ap.add_argument("--corpus", type=Path, default=DEFAULT_CORPUS,
+                    help="the single corpus every outlet merges into "
                          "(default: data/news_scrape_results.json)")
-    ap.add_argument("--no-combine", action="store_true",
-                    help="skip writing the combined corpus")
     args = ap.parse_args()
 
     if args.list_outlets:
@@ -455,10 +515,15 @@ def main():
     if args.image_dir is None:
         args.image_dir = os.path.join(args.data_dir, "images")
 
+    # One parse of the corpus for the whole crawl; see load_corpus_urls().
+    corpus_urls = load_corpus_urls(str(args.corpus))
+    if corpus_urls:
+        log(f"resume: {len(corpus_urls)} URLs already in {args.corpus}")
+
     summaries = []
     for n in names:
         try:
-            summaries.append(crawl_outlet(n, args))
+            summaries.append(crawl_outlet(n, args, corpus_urls))
         except KeyboardInterrupt:
             log("interrupted by user -- finalizing what we have")
             break
@@ -477,12 +542,7 @@ def main():
           f"{sum(s['videos'] for s in summaries):>7d} "
           f"{sum(s['verified'] for s in summaries):>9d}")
 
-    # The per-outlet files above are the crawl's working files; everything
-    # downstream reads one corpus. Merging here keeps the two from drifting --
-    # a crawl that forgot this step would leave the verifier reading stale data.
-    if not args.no_combine:
-        print()
-        combine(Path(args.data_dir), args.corpus)
+    print(f"\ncorpus: {args.corpus}")
 
 
 if __name__ == "__main__":

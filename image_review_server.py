@@ -185,8 +185,8 @@ def main() -> None:
 
     if not args.corpus.is_file():
         parser.error(
-            f"No corpus at {args.corpus}. Build it with: "
-            f"python3 agent_scraping/combine_outlets.py"
+            f"No corpus at {args.corpus}. It is written by the crawl: "
+            f"python3 agent_scraping/scrape.py --outlets all --resume"
         )
     if not STATIC_DIR.is_dir():
         parser.error(f"Web assets directory does not exist: {STATIC_DIR}")

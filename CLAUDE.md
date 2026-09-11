@@ -25,8 +25,9 @@ verification/     judging only         verify_text.py, verify_images_vlm.py, ded
 local_vlm/        model mechanics      backend.py, download_model.py
 image_review_web/       + image_review_server.py       human review site  :8765
 image_vlm_review_web/   + image_vlm_review_server.py   model results site :8766
-data/outlets/     per-outlet crawl working files (never delete — source of truth)
-data/news_scrape_results.json   combined corpus, what every reader consumes
+data/news_scrape_results.json   THE corpus — source of truth, what everything reads
+data/outlets/     only transient per-outlet .jsonl during a crawl (plus legacy
+                  *_flood.json, now unused — safe to delete)
 ```
 
 `agent_scraping/design.md` is the outlet bake-off record: which outlets were
@@ -42,7 +43,6 @@ python3 agent_scraping/scrape.py --list-outlets
 
 # classify images (local GPU, free, default backend)
 python3 local_vlm/download_model.py                        # one time, 55.6 GB
-python3 agent_scraping/combine_outlets.py                  # rebuild corpus by hand
 python3 verification/verify_images_vlm.py --workers 8 --device-map cuda:0
 python3 verification/verify_images_vlm.py --backend hf      # hosted, costs credits
 
@@ -62,10 +62,10 @@ Long crawls: `./agent_scraping/run_crawl.sh` (tmux, survives disconnect).
 
 ```
 scrape.py  --calls verify_text.score_record() INLINE, per article-->
-    data/outlets/<outlet>_flood.json      crawl WORKING files, one per outlet
-        |  combine_outlets.py, run automatically at the end of every crawl
-    data/news_scrape_results.json         CANONICAL corpus, what everything reads
-        |
+    data/outlets/<outlet>_flood.jsonl     per-outlet, appended+flushed per article,
+        |                                 merged and DELETED when the outlet finishes
+    data/news_scrape_results.json         THE corpus: what --resume reads and
+        |                                 what every downstream reader consumes
 verify_images_vlm.py -->
     data/image_vlm_verification_final.json    one row per (article, image) with yes/no
         |
@@ -90,14 +90,22 @@ URL per article, so the index could never disambiguate anything and only broke
 ids when a publisher inserted a photo. **Never hash article_url alone** —
 4,651 of 8,665 rows would collide and be silently skipped.
 
-**The corpus is derived; the per-outlet files are the source of truth.**
-`scrape.py` writes `data/outlets/<outlet>_flood.json` (per-outlet resume,
-atomic finalize, so a crash in one outlet cannot damage the other 28), then
-merges them into `data/news_scrape_results.json`. Never hand-edit the combined
-file -- the next crawl overwrites it. Rebuild it any time with
-`python3 agent_scraping/combine_outlets.py`; `--no-combine` skips it.
-Switching readers to the corpus did NOT change any `occurrence_id` (they come
-from URLs, not file or position), so resume was unaffected -- verified.
+**One corpus, no per-outlet JSON.** `data/news_scrape_results.json` is the
+source of truth: `--resume` reads it, every outlet's finalize merges into it,
+and every downstream reader consumes it. The per-outlet **JSONL** still exists
+during a run (appended and flushed per article, so a kill mid-outlet loses
+nothing) and is deleted once merged. `load_corpus_urls()` parses the corpus
+ONCE per crawl and shares the URL set across outlets -- doing it per outlet
+costs ~8.7s instead of ~0.3s, measured. Set membership is O(1), so corpus size
+does not affect lookup.
+
+**finalize() raises rather than swallowing a bad corpus read.** It used to be
+`except: pass`, which left the record dict empty and wrote the run's handful of
+articles over the whole corpus with no exception and exit code 0. A count
+comparison cannot catch this -- `before` is computed from the same read that
+failed, so it is 0 and `after < before` never fires. The read must be loud.
+`load_corpus_urls()` raises for the same reason: continuing would silently
+re-crawl everything.
 
 **`final.json` is the resume ledger.** `pending = occurrences not in this
 file`. So deleting rows makes them pending again: a verifier run after

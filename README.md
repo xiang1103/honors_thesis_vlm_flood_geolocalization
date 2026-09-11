@@ -1,34 +1,36 @@
-# VLM flood dataset
+# Program Flow 
 
 Collect flood news articles with captioned images from 29 news outlets, then
 filter the images down to usable street-level photographs — by model and by eye.
 
+
 ```
-scrape ──► data/outlets/*_flood.json ──► data/news_scrape_results.json ──► VLM verify ──► data/image_vlm_verification_final.json
-                  (per outlet)                 (combined corpus)                                      │
-                                                      └──► review site :8765 (human)   :8766 (model) ◄┘
+scrape ──► data/news_scrape_results.json ──► VLM verify ──► data/image_vlm_verification_final.json
+                    (the corpus)                                          │
+                          └──► review site :8765 (human)   :8766 (model) ◄┘
 ```
 
 ```
-agent_scraping/   crawl news outlets  -> data/outlets/*.json
-                  combine_outlets.py  -> data/news_scrape_results.json (auto after each crawl)
-verification/     verify_text.py (keyword scoring), verify_images_vlm.py
-                  (model classification), dedupe.py (duplicate removal)
-local_vlm/        model download + GPU inference, used by verify_images_vlm
+agent_scraping/   crawl news outlets  -> data/news_scrape_results.json 
+
+verification/     verify_text.py (keyword scoring) to filter out non-flood relevant reports, verify_images_vlm.py to check for non-relevant images, dedupe.py to check duplicate images  
+
+local_vlm/        local vlm model for running image checks 
+``` 
+
+```
+image_vlm_verification_final.json: all scraped with images and model-decisions on whether the image is relevant 
 ```
 
 
 ## 1. Scrape
 
-Crawls each outlet's flood section, extracts article text and captioned images,
-and scores every article for flood relevance with a keyword filter
-(`flood_score`, `flood_verified`). 
+Load large corpus once → build seen-set → compare during crawl → write back centrally to a corpus → guard the write from new jsonl into the main corpus.
 
 ```bash
 python3 agent_scraping/scrape.py --outlets all --resume
 python3 agent_scraping/scrape.py --outlets guardian,cna --resume   # some outlets
 python3 agent_scraping/scrape.py --list-outlets                    # 29 outlets + expected volume
-python3 agent_scraping/combine_outlets.py                          # rebuild the corpus by hand
 ```
 
 
@@ -49,3 +51,4 @@ Two separate local sites, each on its own port. Both can run at once.
 python3 image_review_server.py          # http://127.0.0.1:8765  — human review
 python3 image_vlm_review_server.py      # http://127.0.0.1:8766  — model results
 ```
+
