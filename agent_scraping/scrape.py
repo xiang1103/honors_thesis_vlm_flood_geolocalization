@@ -36,6 +36,7 @@ from datetime import datetime, timedelta, timezone
 import requests
 import trafilatura
 from lxml import html as lhtml
+from pathlib import Path
 
 _HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, _HERE)
@@ -44,6 +45,7 @@ sys.path.insert(0, _HERE)
 # crawling one. The crawl still calls it inline, per-article, as it always did.
 sys.path.insert(0, os.path.join(os.path.dirname(_HERE), "verification"))
 from adapters import ADAPTERS, IMAGE_OUTLETS, get_adapter   # noqa: E402
+from combine_outlets import combine, DEFAULT_DEST            # noqa: E402
 from verify_text import score_record       # noqa: E402
 
 #: Canonical key order for every emitted record. Human-facing fields first
@@ -428,6 +430,11 @@ def main():
     ap.add_argument("--download-images", action="store_true")
     ap.add_argument("--image-dir", default=None)
     ap.add_argument("--min-images", type=int, default=0)
+    ap.add_argument("--corpus", type=Path, default=DEFAULT_DEST,
+                    help="combined corpus written after the crawl "
+                         "(default: data/news_scrape_results.json)")
+    ap.add_argument("--no-combine", action="store_true",
+                    help="skip writing the combined corpus")
     args = ap.parse_args()
 
     if args.list_outlets:
@@ -469,6 +476,13 @@ def main():
           f"{sum(s['images'] for s in summaries):>8d} "
           f"{sum(s['videos'] for s in summaries):>7d} "
           f"{sum(s['verified'] for s in summaries):>9d}")
+
+    # The per-outlet files above are the crawl's working files; everything
+    # downstream reads one corpus. Merging here keeps the two from drifting --
+    # a crawl that forgot this step would leave the verifier reading stale data.
+    if not args.no_combine:
+        print()
+        combine(Path(args.data_dir), args.corpus)
 
 
 if __name__ == "__main__":

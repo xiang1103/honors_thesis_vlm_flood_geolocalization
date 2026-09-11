@@ -4,13 +4,14 @@ Collect flood news articles with captioned images from 29 news outlets, then
 filter the images down to usable street-level photographs — by model and by eye.
 
 ```
-scrape  ──►  data/outlets/*_flood.json  ──►  VLM verify  ──►  data/image_vlm_verification_final.json
-                      │                                                      │
-                      └──► review site :8765 (human)          review site :8766 (model) ◄──┘
+scrape ──► data/outlets/*_flood.json ──► data/news_scrape_results.json ──► VLM verify ──► data/image_vlm_verification_final.json
+                  (per outlet)                 (combined corpus)                                      │
+                                                      └──► review site :8765 (human)   :8766 (model) ◄┘
 ```
 
 ```
 agent_scraping/   crawl news outlets  -> data/outlets/*.json
+                  combine_outlets.py  -> data/news_scrape_results.json (auto after each crawl)
 verification/     verify_text.py (keyword scoring), verify_images_vlm.py
                   (model classification), dedupe.py (duplicate removal)
 local_vlm/        model download + GPU inference, used by verify_images_vlm
@@ -27,6 +28,7 @@ and scores every article for flood relevance with a keyword filter
 python3 agent_scraping/scrape.py --outlets all --resume
 python3 agent_scraping/scrape.py --outlets guardian,cna --resume   # some outlets
 python3 agent_scraping/scrape.py --list-outlets                    # 29 outlets + expected volume
+python3 agent_scraping/combine_outlets.py                          # rebuild the corpus by hand
 ```
 
 

@@ -125,10 +125,11 @@ def parse_args() -> argparse.Namespace:
         description="Classify every scraped image URL as flood footage or not."
     )
     parser.add_argument(
-        "--data-dir",
+        "--corpus",
         type=Path,
-        default=project_root / "data" / "outlets",
-        help="Directory containing *_flood.json article files.",
+        default=project_root / "data" / "news_scrape_results.json",
+        help="Combined corpus written by agent_scraping/combine_outlets.py "
+             "(default: data/news_scrape_results.json).",
     )
     parser.add_argument(
         "--output",
@@ -222,31 +223,36 @@ def make_occurrence_id(article_url: str, image_url: str) -> str:
     return hashlib.sha256(value).hexdigest()[:24]
 
 
-def iter_image_occurrences(data_dir: Path) -> Iterable[dict[str, Any]]:
-    for source_file in sorted(data_dir.glob("*_flood.json")):
-        for article_index, article in enumerate(read_articles(source_file)):
-            article_url = str(article.get("url") or "")
-            for image_index, image in enumerate(article.get("images") or []):
-                image_url = str(image.get("url") or "").strip()
-                if not image_url:
-                    continue
-                yield {
-                    "occurrence_id": make_occurrence_id(article_url, image_url),
-                    "image_url": image_url,
-                    "caption": image.get("caption") or "",
-                    "image_source": image.get("source"),
-                    "image_index": image_index,
-                    "article_index": article_index,
-                    "article_title": article.get("title") or "",
-                    "article_url": article_url,
-                    "article_date": article.get("date"),
-                    "article_flood_score": article.get("flood_score"),
-                    "article_flood_verified": article.get("flood_verified"),
-                    "outlet": article.get("outlet") or source_file.stem.removesuffix(
-                        "_flood"
-                    ),
-                    "source_file": source_file.name,
-                }
+def iter_image_occurrences(corpus: Path) -> Iterable[dict[str, Any]]:
+    """One occurrence per (article, image) across the whole corpus.
+
+    Reads the combined corpus, not the per-outlet files: those are the crawl's
+    working files, merged into this one at the end of every crawl. Article
+    ORDER here differs from the old per-outlet walk, which changes
+    `article_index` -- but not `occurrence_id`, which is derived from URLs
+    alone, so resume is unaffected by the switch.
+    """
+    for article_index, article in enumerate(read_articles(corpus)):
+        article_url = str(article.get("url") or "")
+        for image_index, image in enumerate(article.get("images") or []):
+            image_url = str(image.get("url") or "").strip()
+            if not image_url:
+                continue
+            yield {
+                "occurrence_id": make_occurrence_id(article_url, image_url),
+                "image_url": image_url,
+                "caption": image.get("caption") or "",
+                "image_source": image.get("source"),
+                "image_index": image_index,
+                "article_index": article_index,
+                "article_title": article.get("title") or "",
+                "article_url": article_url,
+                "article_date": article.get("date"),
+                "article_flood_score": article.get("flood_score"),
+                "article_flood_verified": article.get("flood_verified"),
+                "outlet": article.get("outlet") or "",
+                "source_file": corpus.name,
+            }
 
 
 def is_completed(result: Any) -> bool:
@@ -576,7 +582,12 @@ def main() -> int:
     if args.limit is not None and args.limit < 1:
         raise SystemExit("--limit must be at least 1")
 
-    occurrences = list(iter_image_occurrences(args.data_dir))
+    if not args.corpus.is_file():
+        raise SystemExit(
+            f"No corpus at {args.corpus}. Build it with:\n"
+            f"  python3 agent_scraping/combine_outlets.py"
+        )
+    occurrences = list(iter_image_occurrences(args.corpus))
     completed, url_cache, off_prompt = read_existing_results(
         args.final_output, args.output, PROMPT, args.model
     )

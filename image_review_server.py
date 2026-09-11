@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """Serve a local browser for reviewing flood-news image URLs.
 
-The server reads the existing ``data/outlets/*_flood.json`` files and exposes
-only their metadata. Images are never downloaded by Python; the browser loads
+The server reads the combined corpus ``data/news_scrape_results.json`` and
+exposes only its metadata. Images are never downloaded by Python; the browser loads
 the original remote URLs directly when a review page is visible.
 """
 
@@ -20,7 +20,7 @@ from urllib.parse import urlparse
 
 
 PROJECT_DIR = Path(__file__).resolve().parent
-DEFAULT_DATA_DIR = PROJECT_DIR / "data" / "outlets"
+DEFAULT_CORPUS = PROJECT_DIR / "data" / "news_scrape_results.json"
 STATIC_DIR = PROJECT_DIR / "image_review_web"
 
 # These are useful review hints, not ground-truth classifications.
@@ -73,57 +73,54 @@ def _safe_remote_url(value: object) -> str:
     return url if parsed.scheme in {"http", "https"} and parsed.netloc else ""
 
 
-def load_catalog(data_dir: Path) -> dict:
-    """Load per-outlet arrays and flatten them into one record per image."""
+def load_catalog(corpus: Path) -> dict:
+    """Flatten the combined corpus into one record per image."""
     items: list[dict] = []
-    article_count = 0
 
-    for path in sorted(data_dir.glob("*_flood.json")):
-        try:
-            records = json.loads(path.read_text(encoding="utf-8"))
-        except (OSError, json.JSONDecodeError) as exc:
-            raise RuntimeError(f"Could not read {path}: {exc}") from exc
-        if not isinstance(records, list):
-            raise RuntimeError(f"Expected a JSON array in {path}")
+    try:
+        records = json.loads(corpus.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        raise RuntimeError(f"Could not read {corpus}: {exc}") from exc
+    if not isinstance(records, list):
+        raise RuntimeError(f"Expected a JSON array in {corpus}")
 
-        fallback_outlet = path.stem.removesuffix("_flood")
-        article_count += len(records)
-        for article_index, record in enumerate(records):
-            if not isinstance(record, dict):
+    article_count = len(records)
+    for article_index, record in enumerate(records):
+        if not isinstance(record, dict):
+            continue
+        article_url = _safe_remote_url(record.get("url"))
+        images = record.get("images") or []
+        if not isinstance(images, list):
+            continue
+        for image_index, image in enumerate(images):
+            if not isinstance(image, dict):
+                image = {"url": image, "caption": "", "source": "unknown"}
+            image_url = _safe_remote_url(image.get("url"))
+            if not image_url:
                 continue
-            article_url = _safe_remote_url(record.get("url"))
-            images = record.get("images") or []
-            if not isinstance(images, list):
-                continue
-            for image_index, image in enumerate(images):
-                if not isinstance(image, dict):
-                    image = {"url": image, "caption": "", "source": "unknown"}
-                image_url = _safe_remote_url(image.get("url"))
-                if not image_url:
-                    continue
-                caption = str(image.get("caption") or "").strip()
-                items.append(
-                    {
-                        "id": review_id(article_url, image_url),
-                        "legacy_id": legacy_review_id(
-                            article_url, image_url, image_index
-                        ),
-                        "outlet": str(record.get("outlet") or fallback_outlet),
-                        "article_title": str(record.get("title") or "Untitled article"),
-                        "article_date": str(record.get("date") or ""),
-                        "article_url": article_url,
-                        "flood_score": record.get("flood_score"),
-                        "flood_verified": bool(record.get("flood_verified")),
-                        "image_url": image_url,
-                        "caption": caption,
-                        "image_source": str(image.get("source") or "unknown"),
-                        "image_index": image_index + 1,
-                        "article_image_count": len(images),
-                        "suspect_nonstreet": bool(NON_STREET_HINT.search(caption)),
-                        "source_file": path.name,
-                        "article_index": article_index,
-                    }
-                )
+            caption = str(image.get("caption") or "").strip()
+            items.append(
+                {
+                    "id": review_id(article_url, image_url),
+                    "legacy_id": legacy_review_id(
+                        article_url, image_url, image_index
+                    ),
+                    "outlet": str(record.get("outlet") or "unknown"),
+                    "article_title": str(record.get("title") or "Untitled article"),
+                    "article_date": str(record.get("date") or ""),
+                    "article_url": article_url,
+                    "flood_score": record.get("flood_score"),
+                    "flood_verified": bool(record.get("flood_verified")),
+                    "image_url": image_url,
+                    "caption": caption,
+                    "image_source": str(image.get("source") or "unknown"),
+                    "image_index": image_index + 1,
+                    "article_image_count": len(images),
+                    "suspect_nonstreet": bool(NON_STREET_HINT.search(caption)),
+                    "source_file": corpus.name,
+                    "article_index": article_index,
+                }
+            )
 
     duplicate_counts = Counter(item["image_url"] for item in items)
     for item in items:
@@ -183,15 +180,18 @@ def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--host", default="127.0.0.1")
     parser.add_argument("--port", type=int, default=8765)
-    parser.add_argument("--data-dir", type=Path, default=DEFAULT_DATA_DIR)
+    parser.add_argument("--corpus", type=Path, default=DEFAULT_CORPUS)
     args = parser.parse_args()
 
-    if not args.data_dir.is_dir():
-        parser.error(f"Data directory does not exist: {args.data_dir}")
+    if not args.corpus.is_file():
+        parser.error(
+            f"No corpus at {args.corpus}. Build it with: "
+            f"python3 agent_scraping/combine_outlets.py"
+        )
     if not STATIC_DIR.is_dir():
         parser.error(f"Web assets directory does not exist: {STATIC_DIR}")
 
-    catalog = load_catalog(args.data_dir)
+    catalog = load_catalog(args.corpus)
     summary = catalog["summary"]
     server = ThreadingHTTPServer((args.host, args.port), make_handler(catalog))
     print(

@@ -25,7 +25,8 @@ verification/     judging only         verify_text.py, verify_images_vlm.py, ded
 local_vlm/        model mechanics      backend.py, download_model.py
 image_review_web/       + image_review_server.py       human review site  :8765
 image_vlm_review_web/   + image_vlm_review_server.py   model results site :8766
-data/outlets/     one JSON per outlet  (the corpus — never delete)
+data/outlets/     per-outlet crawl working files (never delete — source of truth)
+data/news_scrape_results.json   combined corpus, what every reader consumes
 ```
 
 `agent_scraping/design.md` is the outlet bake-off record: which outlets were
@@ -41,16 +42,17 @@ python3 agent_scraping/scrape.py --list-outlets
 
 # classify images (local GPU, free, default backend)
 python3 local_vlm/download_model.py                        # one time, 55.6 GB
+python3 agent_scraping/combine_outlets.py                  # rebuild corpus by hand
 python3 verification/verify_images_vlm.py --workers 8 --device-map cuda:0
 python3 verification/verify_images_vlm.py --backend hf      # hosted, costs credits
 
 # audit text scores / remove duplicate images
-python3 verification/verify_text.py data/outlets/cbs_flood.json
+python3 verification/verify_text.py data/news_scrape_results.json
 python3 verification/dedupe.py --dry-run
 python3 verification/dedupe.py --apply            # --drop-near is UNSAFE, see below
 
 # review sites
-python3 image_review_server.py          # :8765 human labelling, reads data/outlets/
+python3 image_review_server.py          # :8765 human labelling, reads the corpus
 python3 image_vlm_review_server.py      # :8766 model results, reads final.json
 ```
 
@@ -60,7 +62,9 @@ Long crawls: `./agent_scraping/run_crawl.sh` (tmux, survives disconnect).
 
 ```
 scrape.py  --calls verify_text.score_record() INLINE, per article-->
-    data/outlets/<outlet>_flood.json      5,889 articles / 8,677 images / 17 MB text / 1,084 videos
+    data/outlets/<outlet>_flood.json      crawl WORKING files, one per outlet
+        |  combine_outlets.py, run automatically at the end of every crawl
+    data/news_scrape_results.json         CANONICAL corpus, what everything reads
         |
 verify_images_vlm.py -->
     data/image_vlm_verification_final.json    one row per (article, image) with yes/no
@@ -85,6 +89,15 @@ included `image_index`; that was removed because `Adapter.images()` dedupes by
 URL per article, so the index could never disambiguate anything and only broke
 ids when a publisher inserted a photo. **Never hash article_url alone** —
 4,651 of 8,665 rows would collide and be silently skipped.
+
+**The corpus is derived; the per-outlet files are the source of truth.**
+`scrape.py` writes `data/outlets/<outlet>_flood.json` (per-outlet resume,
+atomic finalize, so a crash in one outlet cannot damage the other 28), then
+merges them into `data/news_scrape_results.json`. Never hand-edit the combined
+file -- the next crawl overwrites it. Rebuild it any time with
+`python3 agent_scraping/combine_outlets.py`; `--no-combine` skips it.
+Switching readers to the corpus did NOT change any `occurrence_id` (they come
+from URLs, not file or position), so resume was unaffected -- verified.
 
 **`final.json` is the resume ledger.** `pending = occurrences not in this
 file`. So deleting rows makes them pending again: a verifier run after
@@ -137,7 +150,7 @@ blocks and takes the LAST match. Thinking off is also ~10x faster
 
 ## State (2026-09-11)
 
-- Corpus: 5,889 articles, 8,677 images, 29 outlets. 1,872 articles have no
+- Corpus: 5,892 articles, 8,679 images, 29 outlets. ~1,870 articles have no
   images and so appear in no verification output.
 - Classified: ~8,638 rows, ~66% `yes` under the street-level prompt.
 - 1,624 rows (`cbs` 1,456, `fox` 110, `npr` 27, `ap` 23, `nbc` 6, `cnn` 2)
