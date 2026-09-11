@@ -4,6 +4,16 @@ Dataset pipeline for VLM flood geolocalization: crawl flood news from 29
 outlets, then label every image for whether it is a usable street-level
 photograph. Honors thesis project.
 
+## Git — do not commit or push
+
+**Never run `git commit` or `git push`.** The owner handles all commits and
+pushes. Leave finished work staged or unstaged in the working tree and say what
+changed; do not decide when a change is ready to record.
+
+`git mv` and `git rm` are fine when restructuring (they preserve history), but
+they stage changes — stop there. Never `git checkout`/`restore`/`reset` over
+uncommitted work either; ask instead.
+
 ## Environment
 
 ```bash
