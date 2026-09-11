@@ -3,8 +3,8 @@
 This guide describes the complete image-level verification pass after the news
 articles have been scraped. It reads remote image URLs from the outlet JSON
 files, asks a Hugging Face-hosted Qwen vision-language model whether each image
-shows flooding, and records a normalized `yes` or `no` plus the model's raw
-text.
+is a usable street-level photograph, and records a normalized `yes` or `no`
+plus the model's raw text.
 
 The script does **not** download the images. The remote image URL is sent to the
 inference provider so the provider can retrieve and inspect it.
@@ -33,10 +33,31 @@ The default model is:
 Qwen/Qwen3.8-27B:novita
 ```
 
-The classification prompt is defined in `verify_images_vlm.py`. It requires
-visible standing or rising water to cover normally dry ground, roads, or
-building foundations, with inundation as a primary foreground or midground
-element. The requested response is `yes` or `no`.
+The classification prompt is defined in `verify_images_vlm.py`. It accepts any
+ground-level photograph of a real place -- roads, vehicles, people, buildings,
+storefronts, signs -- and rejects maps, radar and weather graphics, satellite
+and aerial views, charts, diagrams, logos, screenshots, and bare portraits.
+The requested response is `yes` or `no`.
+
+**Water is not required.** Flood relevance is established upstream, at the
+article level, by `verify.py` (`flood_score` / `flood_verified`), so every
+image reaching this pass already comes from a flood story. A `yes` means the
+photo carries the ground-level detail geolocation needs -- not that flooding
+is visible in it.
+
+Resume is **prompt-agnostic**: editing `PROMPT` (or passing a different
+`--model`) does not re-classify images that already have an answer. Re-running
+costs provider credits, and an existing answer is kept rather than paid for
+twice.
+
+So after an edit the canonical JSON holds answers from more than one prompt.
+That is expected, and it is visible rather than hidden: every row records the
+exact `prompt` and `model` behind it, the run prints how many rows predate the
+current prompt, and the file's `summary` reports `on_current_prompt`,
+`on_earlier_prompt`, and `distinct_prompts`.
+
+To re-score everything under a new prompt, move the canonical JSON aside first
+-- every occurrence then reads as pending and is classified fresh.
 
 ## 1. Prepare the scraped article files
 

@@ -1,7 +1,7 @@
 # VLM flood dataset
 
 Collect flood news articles with captioned images from 29 news outlets, then
-filter the images down to actual flooding footage — by model and by eye.
+filter the images down to usable street-level photographs — by model and by eye.
 
 ```
 scrape  ──►  data/outlets/*_flood.json  ──►  VLM verify  ──►  data/image_vlm_verification_final.json
@@ -9,9 +9,10 @@ scrape  ──►  data/outlets/*_flood.json  ──►  VLM verify  ──►  
                       └──► review site :8765 (human)          review site :8766 (model) ◄──┘
 ```
 
-Everything runs locally. No image is ever downloaded: the scrapers store image
-URLs, and the review sites load them in your browser straight from the
-publisher.
+Everything runs locally. Images are never saved to disk: the scrapers store
+image URLs, the review sites load them in your browser straight from the
+publisher, and the local classifier fetches them into memory for one forward
+pass and discards them.
 
 Activate the environment first — the base `python3` is missing
 `huggingface_hub` and step 2 will fail without it:
@@ -37,18 +38,27 @@ already collected, so the crawl is safe to kill with Ctrl-C and re-run.
 
 ## 2. VLM image verification
 
-Asks a vision model whether each scraped image actually shows flooding. Run it
-after a crawl; it is a separate pass, not chained to the scraper.
+Asks a vision model whether each scraped image is a usable street-level
+photograph — roads, vehicles, people, buildings — rejecting maps, radar,
+satellite views, charts, and headshots. Water is not required: the articles are
+already flood-filtered in step 1, so `yes` means the image is usable for
+geolocation, not that flooding is visible. Run it after a crawl; it is a
+separate pass, not chained to the scraper.
 
-The token is read from `HF_TOKEN`, else a `.env` in the project root, else an
-interactive prompt — first one found wins:
+Runs on this machine's GPU by default — free, so prompt experiments cost
+nothing. Fetch the weights once (~56 GB, into `/home/liu47/models/`):
 
 ```bash
-cp .env.example .env && $EDITOR .env      # HF_TOKEN=hf_...   (.env is gitignored)
-
+python3 local_vlm/download_model.py                     # one time
 python3 agent_scraping/verify_images_vlm.py --limit 20  # small test run first
 python3 agent_scraping/verify_images_vlm.py --workers 4
+python3 agent_scraping/verify_images_vlm.py --device-map cuda:0   # pin one GPU
 ```
+
+All model loading and inference lives in `local_vlm/`; the verifier only
+orchestrates. To use the hosted API instead (costs HF credits), pass
+`--backend hf`; the token is read from `HF_TOKEN`, else a `.env` in the project
+root (`cp .env.example .env`), else an interactive prompt.
 
 Output: `data/image_vlm_verification_final.json` — one `yes`/`no` per image.
 Re-running resumes from it and never re-pays for an image already classified,
@@ -79,7 +89,8 @@ been verified, so run step 2 first.
 |---|---|
 | `data/outlets/<outlet>_flood.json` | articles: title, date, url, text, images, videos, flood score |
 | `data/image_vlm_verification_final.json` | one VLM `yes`/`no` per image; resumable store of record |
-| `data/logs/` | crawl logs |
+| `data/logs/` | crawl and verification logs |
+| `/home/liu47/models/Qwen3.8-27B` | local model weights (~56 GB, outside the repo) |
 
 Intermediate `.jsonl` files appear next to both outputs while a run is in
 progress and are merged in and deleted when it finishes (`--keep-jsonl` to

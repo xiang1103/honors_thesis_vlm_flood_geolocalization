@@ -32,16 +32,40 @@ from huggingface_hub import InferenceClient
 
 
 MODEL = "Qwen/Qwen3.8-27B:novita"
+#: Selects usable STREET-LEVEL imagery, not flood imagery. Flood relevance is
+#: already established upstream at the article level by verify.py's
+#: flood_score/flood_verified, so every image reaching this prompt comes from a
+#: flood story; what this pass decides is whether the photo carries the
+#: ground-level detail geolocation needs. A `yes` therefore does NOT assert
+#: that water is visible.
+#:
+#: Resume is deliberately PROMPT-AGNOSTIC: editing this string does not
+#: re-classify images that already have an answer. Re-running is expensive, and
+#: an existing answer is treated as good enough to keep. The consequence is
+#: that after an edit the canonical JSON holds answers from more than one
+#: prompt; each row records the exact `prompt` and `model` that produced it, so
+#: the mix is always visible per row, and the run prints how many rows predate
+#: the current prompt. To re-score everything under a new prompt, move the
+#: canonical JSON aside so every occurrence reads as pending.
 PROMPT = (
-    "Is this an image that contains flooding footage? The image must show "
-    "standing water covering ground, roads, or building foundations, or "
-    "significant rising water levels that submerge dry land structures. The "
-    "water must be visible in the foreground or midground as the primary or "
-    "dominant element indicating inundation. Answer yes or no."
+    "Is this a street-level photograph? Answer yes if the image shows anything "
+    "a street view would contain: roads, streets, cars or other vehicles, "
+    "people, buildings, houses, storefronts, signs, or similar ground-level "
+    "surroundings. Water does not need to be present, and flooding is not "
+    "required. Answer no only if the image is not a ground-level photograph of "
+    "a real place, such as a map, radar or weather graphic, satellite or "
+    "aerial view, chart, diagram, logo, screenshot, or a portrait or headshot "
+    "with no surroundings visible. Answer yes or no."
 )
 
 ANSWER_RE = re.compile(r"\b(yes|no)\b", re.IGNORECASE)
 FATAL_HTTP_CODES = {401, 402, 403}
+#: Consecutive fatal-looking responses required before the whole run stops. A
+#: real auth or credit failure fails EVERY request, so it reaches this in
+#: seconds; a one-off 403 from a single image does not. Stopping on the first
+#: one previously ended a 6,529-call run after 10 calls, on an image that
+#: succeeded on retry.
+FATAL_STREAK_LIMIT = 3
 TRANSIENT_HTTP_CODES = {408, 409, 425, 429, 500, 502, 503, 504}
 
 
@@ -132,7 +156,27 @@ def parse_args() -> argparse.Namespace:
         action="store_true",
         help="Keep the intermediate JSONL instead of deleting it after the merge.",
     )
-    parser.add_argument("--model", default=MODEL)
+    parser.add_argument(
+        "--backend",
+        choices=("local", "hf"),
+        default="local",
+        help="'local' runs the model on this machine's GPU (free, default); "
+             "'hf' calls the hosted Hugging Face inference API (costs credits).",
+    )
+    parser.add_argument(
+        "--model-path",
+        default=None,
+        help="Directory holding the local model weights "
+             "(default: local_vlm.DEFAULT_MODEL_PATH). Used by --backend local.",
+    )
+    parser.add_argument(
+        "--device-map",
+        default="auto",
+        help="accelerate device_map for the local model: 'auto', 'cuda:0', "
+             "etc. Pin a single free GPU to leave the others alone.",
+    )
+    parser.add_argument("--model", default=MODEL,
+                        help="Hosted model id. Used by --backend hf.")
     parser.add_argument(
         "--workers",
         type=int,
@@ -214,9 +258,14 @@ def is_completed(result: Any) -> bool:
 
 
 def read_existing_results(
-    final_path: Path, history_path: Path
-) -> tuple[dict[str, dict[str, Any]], dict[str, dict[str, str]]]:
-    """Every completed classification still on disk, keyed by occurrence id.
+    final_path: Path, history_path: Path, prompt: str, model: str
+) -> tuple[dict[str, dict[str, Any]], dict[str, dict[str, str]], int]:
+    """Completed classifications on disk: (by id, url_cache, off_prompt_count).
+
+    EVERY completed result is reusable, whatever prompt or model produced it --
+    an answer already paid for is never re-requested just because the criteria
+    changed since. `prompt` and `model` are used only to count how many stored
+    rows predate the current run, which is reported and changes nothing.
 
     The canonical JSON is read first because it is the store of record: the
     history JSONL is deleted once merged, so on a normal re-run the canonical
@@ -226,6 +275,7 @@ def read_existing_results(
     """
     latest: dict[str, dict[str, Any]] = {}
     url_cache: dict[str, dict[str, str]] = {}
+    off_prompt: set[str] = set()
 
     def absorb(result: Any) -> None:
         if not is_completed(result):
@@ -233,6 +283,10 @@ def read_existing_results(
         occurrence_id = result.get("occurrence_id")
         if occurrence_id:
             latest[str(occurrence_id)] = result
+            if result.get("prompt") != prompt or result.get("model") != model:
+                off_prompt.add(str(occurrence_id))
+            else:
+                off_prompt.discard(str(occurrence_id))
         image_url = result.get("image_url")
         if image_url:
             url_cache[str(image_url)] = {
@@ -270,15 +324,32 @@ def read_existing_results(
                     continue
                 absorb(result)
 
-    return latest, url_cache
+    return latest, url_cache, len(off_prompt)
+
+
+#: A status is only read out of free text when it is stated AS a status. The
+#: previous version matched any bare 4xx/5xx-looking number anywhere in the
+#: message -- and the message embeds the image URL, which for these CDNs is
+#: full of numbers (`cropW=1200`, `width=862`, `height=485`). That turned an
+#: ordinary transient failure into a phantom 401/402/403 and stopped the run.
+_URL_RE = re.compile(r"https?://\S+")
+_STATUS_RE = re.compile(
+    r"(?:status(?:\s*code)?|HTTP(?:/\d(?:\.\d)?)?|response)\D{0,3}\b([45]\d\d)\b",
+    re.IGNORECASE,
+)
 
 
 def extract_http_status(exc: BaseException) -> int | None:
+    """HTTP status behind a provider exception, or None if not determinable."""
     response = getattr(exc, "response", None)
     status = getattr(response, "status_code", None)
     if isinstance(status, int):
         return status
-    match = re.search(r"\b(4\d\d|5\d\d)\b", str(exc))
+    status = getattr(exc, "status_code", None)
+    if isinstance(status, int):
+        return status
+    text = _URL_RE.sub("<url>", str(exc))      # never read a status out of a URL
+    match = _STATUS_RE.search(text)
     return int(match.group(1)) if match else None
 
 
@@ -372,8 +443,9 @@ def classify_url(
             status = extract_http_status(exc)
             fatal = status in FATAL_HTTP_CODES
             transient = status in TRANSIENT_HTTP_CODES or status is None
-            if fatal:
-                stop_event.set()
+            # Deliberately does NOT stop the run here. Whether an auth/credit
+            # failure is real is a question about the RUN, not one request, so
+            # the consumer loop decides after seeing a streak of them.
             if fatal or not transient or attempt >= retries:
                 result = {
                     "status": "error",
@@ -451,17 +523,27 @@ def write_final_results(
             seen.add(occurrence_id)
     ordered.extend(r for oid, r in latest.items() if oid not in seen)
 
+    # Resume is prompt-agnostic, so rows scored under an earlier prompt are kept
+    # rather than re-run. That makes a mixed file normal, not a fault -- report
+    # the mix so it is visible without inspecting every row.
+    rows_on_current_prompt = sum(r.get("prompt") == PROMPT for r in ordered)
     summary = {
         "source_occurrences": len(occurrences),
         "completed_occurrences": len(seen),
         "missing_occurrences": len(occurrences) - len(seen),
         "carried_occurrences": len(ordered) - len(seen),
         "stored_occurrences": len(ordered),
+        "on_current_prompt": rows_on_current_prompt,
+        "on_earlier_prompt": len(ordered) - rows_on_current_prompt,
+        "distinct_prompts": len({r.get("prompt") for r in ordered}),
         "yes": sum(r["answer"] == "yes" for r in ordered),
         "no": sum(r["answer"] == "no" for r in ordered),
     }
     payload = {
         "summary": summary,
+        # The prompt this run would use -- NOT necessarily the one behind every
+        # row. Each row carries its own `prompt`; that is the authoritative one.
+        "current_prompt": PROMPT,
         "prompt": PROMPT,
         "results": ordered,
     }
@@ -495,7 +577,10 @@ def main() -> int:
         raise SystemExit("--limit must be at least 1")
 
     occurrences = list(iter_image_occurrences(args.data_dir))
-    completed, url_cache = read_existing_results(args.final_output, args.output)
+    completed, url_cache, off_prompt = read_existing_results(
+        args.final_output, args.output, PROMPT, args.model
+    )
+    # (resume is prompt-agnostic; `model` here only feeds the informational count)
     pending = [o for o in occurrences if o["occurrence_id"] not in completed]
 
     grouped: dict[str, list[dict[str, Any]]] = {}
@@ -511,6 +596,12 @@ def main() -> int:
         f"Already completed: {len(completed)} occurrences. "
         f"Pending: {len(pending)} occurrences."
     )
+    if off_prompt:
+        print(
+            f"Note: {off_prompt} stored result(s) came from a different prompt or "
+            f"model and are being KEPT as-is, not re-classified. Each row records "
+            f"the prompt and model that produced it."
+        )
     if not pending:
         summary = write_final_results(
             args.output, args.final_output, occurrences, completed
@@ -520,14 +611,44 @@ def main() -> int:
         print(f"Summary: {summary}")
         return 0
 
-    token, token_source = resolve_token(args.env_file)
-    if not token:
-        raise SystemExit("No Hugging Face token supplied.")
-    print(f"Using HF token from {token_source}.")
+    # One place decides what a single classification means; everything below is
+    # backend-agnostic and keeps working unchanged for either path.
+    stop_event = threading.Event()
+    if args.backend == "local":
+        sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+        from local_vlm import DEFAULT_MODEL_PATH, LocalVLM
+
+        vlm = LocalVLM(args.model_path or DEFAULT_MODEL_PATH,
+                       device_map=args.device_map)
+        model_name = vlm.name
+        print(f"Loading {vlm.model_path} onto {args.device_map} ...", flush=True)
+        load_started = time.monotonic()
+        try:
+            vlm.load()
+        except Exception as exc:
+            raise SystemExit(
+                f"Could not load the local model: {type(exc).__name__}: {exc}\n"
+                f"Download it first:  python3 local_vlm/download_model.py"
+            )
+        print(f"Loaded in {time.monotonic() - load_started:.0f}s.", flush=True)
+
+        def classify(image_url: str) -> dict[str, Any]:
+            return vlm.classify(image_url, PROMPT, args.retries, stop_event)
+    else:
+        token, token_source = resolve_token(args.env_file)
+        if not token:
+            raise SystemExit("No Hugging Face token supplied.")
+        print(f"Using HF token from {token_source}.")
+        model_name = args.model
+
+        def classify(image_url: str) -> dict[str, Any]:
+            return classify_url(image_url, token, args.model, args.retries,
+                                stop_event)
 
     counts = {"yes": 0, "no": 0, "invalid_output": 0, "error": 0}
     written = 0
     model_calls = 0
+    fatal_streak = 0
 
     with args.output.open("a", encoding="utf-8") as output_handle:
         # Materialize any duplicate URLs that were classified in an earlier run.
@@ -544,7 +665,7 @@ def main() -> int:
                 }
                 append_result(
                     output_handle,
-                    result_record(occurrence, classification, args.model, True),
+                    result_record(occurrence, classification, model_name, True),
                 )
                 counts[cached["answer"]] += 1
                 written += 1
@@ -553,20 +674,10 @@ def main() -> int:
         if args.limit is not None:
             urls = urls[: args.limit]
 
-        stop_event = threading.Event()
         futures: dict[Future[dict[str, Any]], str] = {}
         with ThreadPoolExecutor(max_workers=args.workers) as executor:
             for image_url in urls:
-                futures[
-                    executor.submit(
-                        classify_url,
-                        image_url,
-                        token,
-                        args.model,
-                        args.retries,
-                        stop_event,
-                    )
-                ] = image_url
+                futures[executor.submit(classify, image_url)] = image_url
 
             total_calls = len(futures)
             for future in as_completed(futures):
@@ -582,7 +693,7 @@ def main() -> int:
                         result_record(
                             occurrence,
                             classification,
-                            args.model,
+                            model_name,
                             duplicate_index > 0,
                         ),
                     )
@@ -600,12 +711,29 @@ def main() -> int:
                     f"{answer or status}: {image_url[:110]}",
                     flush=True,
                 )
+                # Only an unbroken run of fatal responses means the account,
+                # not the image, is the problem. Anything that succeeds or
+                # fails differently clears it.
                 if classification.get("fatal"):
+                    fatal_streak += 1
                     print(
-                        "Fatal provider response; stopping safely. Re-run later to resume.",
+                        f"  auth/credit-style response "
+                        f"({classification.get('http_status')}), "
+                        f"{fatal_streak}/{FATAL_STREAK_LIMIT} in a row: "
+                        f"{str(classification.get('error'))[:160]}",
                         file=sys.stderr,
                         flush=True,
                     )
+                    if fatal_streak >= FATAL_STREAK_LIMIT:
+                        stop_event.set()
+                        print(
+                            f"{FATAL_STREAK_LIMIT} consecutive auth/credit failures; "
+                            "stopping safely. Re-run later to resume.",
+                            file=sys.stderr,
+                            flush=True,
+                        )
+                else:
+                    fatal_streak = 0
 
     print(
         "Finished this run: "
