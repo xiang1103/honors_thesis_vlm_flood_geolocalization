@@ -15,7 +15,9 @@ activate first. The env has torch 2.11+cu130, transformers 5.6.1.
 
 Hardware: 10x RTX PRO 6000 Blackwell, 96 GB VRAM each; GPUs 4 and 5 usually
 have other users' processes, the rest are free. 1 TB RAM, 344 threads.
-`/home/liu47` is NFS and sits at ~97% used (hundreds of GB free, but check).
+`/home/liu47` is NFS. It reads 97% used, which is misleading -- it is a 15 TB
+filesystem with ~460 GB free, about 20,000x the corpus. Do not design around
+disk pressure without checking the absolute number first.
 
 ## Layout
 
@@ -26,8 +28,8 @@ local_vlm/        model mechanics      backend.py, download_model.py
 image_review_web/       + image_review_server.py       human review site  :8765
 image_vlm_review_web/   + image_vlm_review_server.py   model results site :8766
 data/news_scrape_results.json   THE corpus — source of truth, what everything reads
-data/outlets/     only transient per-outlet .jsonl during a crawl (plus legacy
-                  *_flood.json, now unused — safe to delete)
+data/outlets/     empty except for transient <outlet>_flood.jsonl DURING a crawl.
+                  Recreated by makedirs; gitignored, so absent in a fresh clone.
 ```
 
 `agent_scraping/design.md` is the outlet bake-off record: which outlets were
@@ -119,10 +121,29 @@ holds answers from more than one prompt; each row records its own `prompt` and
 `model`, and `summary` reports `on_current_prompt` / `on_earlier_prompt` /
 `distinct_prompts`. To re-score everything, move `final.json` aside first.
 
-**JSONL is transient.** Written per result during a run, merged into the JSON
-and deleted at the end (`--keep-jsonl` retains it). The merge MUST merge, not
-overwrite — under `--resume` the JSONL holds only this run's records. A JSONL
-left on disk means a run died before finalizing.
+**JSONL is transient, and it is not redundant with the corpus.** Both the
+crawl and the image verifier use the same pattern: append+flush per record
+during a run, merge into the JSON at the end, delete (`--keep-jsonl` retains
+it). The merge MUST merge, not overwrite -- the JSONL holds only THIS run's
+records.
+
+The crawl's JSONL is not made redundant by `load_corpus_urls()`. The corpus
+only learns an outlet's articles at `finalize()`, i.e. after the whole outlet
+completes -- floodlist is 4,227 articles at `--delay 0.6`, roughly 45 minutes.
+The JSONL is the only thing holding work inside that window. A `.jsonl` found
+in `data/outlets/` is therefore **unmerged work, not garbage**: re-run that
+outlet with `--resume` and it is folded in and cleaned up automatically. Never
+delete one to "tidy up".
+
+**Guards on the corpus write, and the ones deliberately absent.** `finalize()`
+fsyncs before `os.replace` (durable bytes, not page-cache bytes -- matters more
+on NFS) and deletes the partial `.tmp` if the write fails, leaving the corpus
+and JSONL untouched. A failed write cannot corrupt the corpus: `os.replace` is
+atomic and never runs. Deliberately NOT added, do not re-add them:
+`after < before` (a dict merge can only grow, so it cannot fire), a pre-flight
+free-space check and a post-write re-read (not warranted at 20,000x headroom).
+Atomicity is not correctness -- a complete but wrong file replaces a good one
+just as atomically, which is why the READ guard is the one that matters.
 
 **Local model: thinking stays OFF.** `Qwen3.8-27B` is a reasoning model whose
 template defaults to `enable_thinking=True` at `reasoning_effort='xhigh'`. Left
@@ -158,8 +179,16 @@ blocks and takes the LAST match. Thinking off is also ~10x faster
 
 ## State (2026-09-11)
 
+```
+data/news_scrape_results.json      22M   the corpus
+data/image_vlm_verification_final.json  15M   image labels
+data/image_digests.json           2.0M   fingerprint cache for dedupe
+```
+
 - Corpus: 5,892 articles, 8,679 images, 29 outlets. ~1,870 articles have no
   images and so appear in no verification output.
+- The 29 per-outlet `data/outlets/*_flood.json` were deleted once the corpus
+  was verified a field-for-field superset; they remain in git history.
 - Classified: ~8,638 rows, ~66% `yes` under the street-level prompt.
 - 1,624 rows (`cbs` 1,456, `fox` 110, `npr` 27, `ap` 23, `nbc` 6, `cnn` 2)
   still carry the OLD flood-footage prompt, where `yes` meant visible water.
