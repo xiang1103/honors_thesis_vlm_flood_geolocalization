@@ -14,7 +14,7 @@ __init__.py         exports LocalVLM + DEFAULT_MODEL_PATH
 
 ```bash
 python3 local_vlm/download_model.py          # once, ~56 GB
-python3 agent_scraping/verify_images_vlm.py  # --backend local is the default
+python3 verification/verify_images_vlm.py  # --backend local is the default
 ```
 
 ```python

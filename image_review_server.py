@@ -40,7 +40,7 @@ REVIEW_ID_SCHEME = "human_review_v2"
 def review_id(article_url: str, image_url: str) -> str:
     """Identity of one image-in-one-article, for HUMAN review decisions.
 
-    Domain-separated on purpose. `verify_images_vlm.make_occurrence_id()`
+    Domain-separated on purpose. `verification/verify_images_vlm.py`'s make_occurrence_id()
     hashes the same two fields for the model's answers; without the literal
     prefix the two ids would be indistinguishable strings over identical
     inputs, and it would be far too easy to join or overwrite one with the

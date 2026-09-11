@@ -69,21 +69,42 @@ def score_record(rec):
     return rec
 
 
+def load_records(path):
+    """Records from either on-disk shape.
+
+    The crawl's intermediate is JSONL (one object per line); the file it
+    finalizes to is a pretty-printed JSON array, and the JSONL is deleted on
+    completion. Accepting only JSONL meant this CLI could not audit any file
+    that normally survives a run.
+    """
+    import json
+
+    with open(path) as handle:
+        text = handle.read().strip()
+    if not text:
+        return []
+    if text.lstrip().startswith("["):
+        return json.loads(text)
+    return [json.loads(line) for line in text.splitlines() if line.strip()]
+
+
 if __name__ == "__main__":
-    import sys, json
+    import sys
+
+    if len(sys.argv) < 2:
+        raise SystemExit(
+            "usage: verify_text.py <data/outlets/<outlet>_flood.json | records.jsonl>\n"
+            "Re-scores every record and reports the lowest-scoring titles."
+        )
     path = sys.argv[1]
     n = ok = 0
     lo = []
-    with open(path) as f:
-        for line in f:
-            line = line.strip()
-            if not line:
-                continue
-            r = score_record(json.loads(line))
-            n += 1
-            ok += r["flood_verified"]
-            if not r["flood_verified"]:
-                lo.append((r["flood_score"], r.get("title", "")[:70]))
+    for rec in load_records(path):
+        r = score_record(rec)
+        n += 1
+        ok += r["flood_verified"]
+        if not r["flood_verified"]:
+            lo.append((r["flood_score"], (r.get("title") or "")[:70]))
     print(f"{path}: {n} records, {ok} verified ({ok/max(n,1)*100:.1f}%)")
     for s, t in sorted(lo)[:10]:
         print(f"  low {s:.2f}  {t}")

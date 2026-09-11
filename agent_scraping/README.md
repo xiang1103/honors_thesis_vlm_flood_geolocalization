@@ -50,7 +50,7 @@ $PY scrape.py --outlets all --resume
 $PY scrape.py --outlets all --download-images --image-dir ../data/images
 
 # audit an existing dataset (no network, no tokens)
-$PY verify.py ../data/cbs_flood.json
+$PY ../verification/verify_text.py ../data/outlets/cbs_flood.json   # audit scores
 ```
 
 Each outlet writes **`data/outlets/{outlet}_flood.json`** — a single pretty-printed
@@ -108,7 +108,7 @@ No API key, no headless browser, no `bs4`/`feedparser`.
 |---|---|
 | `scrape.py` | crawl loop: fetch w/ backoff, parse, score, write JSONL |
 | `adapters.py` | per-outlet discovery + image selection (CBS / AP / NBC) |
-| `verify.py` | zero-token flood scoring; also a standalone audit CLI |
+| `../verification/verify_text.py` | zero-token flood scoring; also a standalone audit CLI |
 | `export.py` | filter/convert a dataset (`--verified-only`, `--min-images`) |
 | `design.md` | why CBS, the measurements, and the scope decisions |
 

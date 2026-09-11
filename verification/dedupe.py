@@ -23,8 +23,8 @@ absence of proof is not proof of duplication.
 
 Digests are cached to --cache so re-running costs no network.
 
-    python3 local_vlm/dedupe.py --dry-run
-    python3 local_vlm/dedupe.py --apply --drop-near
+    python3 verification/dedupe.py --dry-run
+    python3 verification/dedupe.py --apply --drop-near
 """
 from __future__ import annotations
 

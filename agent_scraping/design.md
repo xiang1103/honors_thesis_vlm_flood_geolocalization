@@ -122,7 +122,7 @@ multi-agent verification "only if needed." It isn't:
   would dominate cost for a ~1,000-article crawl (the task explicitly asks to
   limit token usage and keep the work in reproducible code).
 
-Instead `verify.py` applies a **zero-token heuristic**: flood-term density
+Instead `verification/verify_text.py` applies a **zero-token heuristic**: flood-term density
 across title/text/captions, producing `flood_score` + `flood_verified` on every
 record. Records are kept, not dropped, so the threshold stays tunable after the
 fact without re-crawling. If a manual audit later shows the heuristic is
@@ -191,7 +191,7 @@ both query several indexes and merge. CBS tags that exist (all others 404 —
 `severe-weather`
 
 The last four are flood-*adjacent*, not flood-specific. They are included
-deliberately and left for `verify.py` to score rather than filtered at crawl
+deliberately and left for `verification/verify_text.py` to score rather than filtered at crawl
 time, because hurricane/tropical-storm coverage is dense with flood imagery.
 Filter on `flood_verified` downstream to get the strict subset.
 

@@ -1,7 +1,7 @@
 """Local GPU inference for the image classifier.
 
 Everything about running the model lives here: loading it, fetching and
-decoding the image, prompting, and normalising the answer. `verify_images_vlm`
+decoding the image, prompting, and normalising the answer. `verification/verify_images_vlm.py`
 keeps the orchestration it already had -- occurrence flattening, URL dedupe,
 resume, JSONL merge -- and only swaps where a single classification comes from.
 

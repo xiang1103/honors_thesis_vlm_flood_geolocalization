@@ -9,6 +9,13 @@ scrape  ──►  data/outlets/*_flood.json  ──►  VLM verify  ──►  
                       └──► review site :8765 (human)          review site :8766 (model) ◄──┘
 ```
 
+```
+agent_scraping/   crawl news outlets  -> data/outlets/*.json
+verification/     verify_text.py (keyword scoring), verify_images_vlm.py
+                  (model classification), dedupe.py (duplicate removal)
+local_vlm/        model download + GPU inference, used by verify_images_vlm
+```
+
 Everything runs locally. Images are never saved to disk: the scrapers store
 image URLs, the review sites load them in your browser straight from the
 publisher, and the local classifier fetches them into memory for one forward
@@ -50,9 +57,9 @@ nothing. Fetch the weights once (~56 GB, into `/home/liu47/models/`):
 
 ```bash
 python3 local_vlm/download_model.py                     # one time
-python3 agent_scraping/verify_images_vlm.py --limit 20  # small test run first
-python3 agent_scraping/verify_images_vlm.py --workers 4
-python3 agent_scraping/verify_images_vlm.py --device-map cuda:0   # pin one GPU
+python3 verification/verify_images_vlm.py --limit 20  # small test run first
+python3 verification/verify_images_vlm.py --workers 4
+python3 verification/verify_images_vlm.py --device-map cuda:0   # pin one GPU
 ```
 
 All model loading and inference lives in `local_vlm/`; the verifier only
@@ -90,6 +97,7 @@ been verified, so run step 2 first.
 | `data/outlets/<outlet>_flood.json` | articles: title, date, url, text, images, videos, flood score |
 | `data/image_vlm_verification_final.json` | one VLM `yes`/`no` per image; resumable store of record |
 | `data/logs/` | crawl and verification logs |
+| `data/image_digests.json` | cached image fingerprints for deduplication |
 | `/home/liu47/models/Qwen3.8-27B` | local model weights (~56 GB, outside the repo) |
 
 Intermediate `.jsonl` files appear next to both outputs while a run is in

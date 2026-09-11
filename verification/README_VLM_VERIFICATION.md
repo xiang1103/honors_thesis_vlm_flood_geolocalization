@@ -15,7 +15,7 @@ inference provider so the provider can retrieve and inspect it.
 data/outlets/*_flood.json
         |
         v
-agent_scraping/verify_images_vlm.py
+verification/verify_images_vlm.py
         |
         +--> data/image_vlm_verification.jsonl
         |    intermediate, written and flushed per result so a crash
@@ -40,7 +40,7 @@ and aerial views, charts, diagrams, logos, screenshots, and bare portraits.
 The requested response is `yes` or `no`.
 
 **Water is not required.** Flood relevance is established upstream, at the
-article level, by `verify.py` (`flood_score` / `flood_verified`), so every
+article level, by `verify_text.py` (`flood_score` / `flood_verified`), so every
 image reaching this pass already comes from a flood story. A `yes` means the
 photo carries the ground-level detail geolocation needs -- not that flooding
 is visible in it.
@@ -159,7 +159,7 @@ may consume provider credits, depending on the account and provider.
 Use separate test output files so the test does not modify the main history:
 
 ```powershell
-python agent_scraping\verify_images_vlm.py `
+python verification\verify_images_vlm.py `
   --limit 1 `
   --workers 1 `
   --output data\image_vlm_verification_test.jsonl `
@@ -182,7 +182,7 @@ python -c "import json; p=json.load(open(r'data\image_vlm_verification_test_fina
 After the one-image test succeeds, run the canonical pass:
 
 ```powershell
-python agent_scraping\verify_images_vlm.py --workers 4
+python verification\verify_images_vlm.py --workers 4
 ```
 
 The default paths are:
@@ -197,7 +197,7 @@ Four concurrent workers balance throughput and provider pressure. Reduce the
 number if rate limits occur:
 
 ```powershell
-python agent_scraping\verify_images_vlm.py --workers 1
+python verification\verify_images_vlm.py --workers 1
 ```
 
 The script automatically retries transient network errors and provider errors
@@ -208,7 +208,7 @@ such as HTTP 429 or 5xx responses. The default is three attempts per URL.
 Run the same command again:
 
 ```powershell
-python agent_scraping\verify_images_vlm.py --workers 4
+python verification\verify_images_vlm.py --workers 4
 ```
 
 Before calling the model, the script reads the canonical JSON, then the
@@ -300,7 +300,7 @@ never stored as completed, so the next run retries them.
 Show the script's current options at any time:
 
 ```powershell
-python agent_scraping\verify_images_vlm.py --help
+python verification\verify_images_vlm.py --help
 ```
 
 ## Common problems

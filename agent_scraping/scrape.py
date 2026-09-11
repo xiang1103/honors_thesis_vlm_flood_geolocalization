@@ -37,9 +37,14 @@ import requests
 import trafilatura
 from lxml import html as lhtml
 
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+_HERE = os.path.dirname(os.path.abspath(__file__))
+sys.path.insert(0, _HERE)
+# The text scorer lives in verification/ with the image verifier and the
+# deduplicator -- scoring what was scraped is a verification concern, not a
+# crawling one. The crawl still calls it inline, per-article, as it always did.
+sys.path.insert(0, os.path.join(os.path.dirname(_HERE), "verification"))
 from adapters import ADAPTERS, IMAGE_OUTLETS, get_adapter   # noqa: E402
-from verify import score_record           # noqa: E402
+from verify_text import score_record       # noqa: E402
 
 #: Canonical key order for every emitted record. Human-facing fields first
 #: (title/outlet/date), then the payload, then machine metadata. Python dicts

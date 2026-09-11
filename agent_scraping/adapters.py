@@ -443,7 +443,7 @@ class CBSAdapter(Adapter):
     Several flood-adjacent tags are merged for volume. `flooding` and
     `flash-flooding` are direct; `tropical-storm`, `hurricane`, `landslide` and
     `severe-weather` are adjacent and frequently carry flood imagery. They are
-    included deliberately and left for `verify.py` to score rather than being
+    included deliberately and left for `verify_text.py` to score rather than being
     dropped at crawl time -- filter on `flood_verified` downstream.
 
     Tags confirmed to exist (others 404): floods, flood, storms,

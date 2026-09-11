@@ -62,7 +62,7 @@ python image_vlm_review_server.py --results-file "C:\path\to\another_final.json"
 ```
 
 The file must have the same structure produced by
-`agent_scraping/verify_images_vlm.py`.
+`verification/verify_images_vlm.py`.
 
 ## Files used by the website
 
