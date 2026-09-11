@@ -255,3 +255,23 @@ a { color: var(--blue); }
   .result-bar { align-items: start; flex-direction: column; padding-block: 0.9rem; }
   .image-button { height: 18rem; }
 }
+
+/* Storage-scheme notices: shown when review ids change under the decisions
+   saved in this browser. Deliberately loud -- a silent empty review list is
+   the exact failure this is here to prevent. */
+.storage-notice {
+  margin: 0 0 1rem;
+  padding: 0.75rem 1rem;
+  border-radius: 8px;
+  border: 1px solid #2f6f4f;
+  background: #123122;
+  color: #d7f5e4;
+  font-size: 0.92rem;
+  line-height: 1.45;
+}
+
+.storage-notice-warn {
+  border-color: #8a6320;
+  background: #3a2c10;
+  color: #ffe3ad;
+}

@@ -31,6 +31,42 @@ NON_STREET_HINT = re.compile(
 )
 
 
+#: Bump when the shape of `review_id()` changes. The browser stores this
+#: alongside the decisions it saved, so a future change is detected and
+#: migrated loudly instead of silently presenting an empty review set.
+REVIEW_ID_SCHEME = "human_review_v2"
+
+
+def review_id(article_url: str, image_url: str) -> str:
+    """Identity of one image-in-one-article, for HUMAN review decisions.
+
+    Domain-separated on purpose. `verify_images_vlm.make_occurrence_id()`
+    hashes the same two fields for the model's answers; without the literal
+    prefix the two ids would be indistinguishable strings over identical
+    inputs, and it would be far too easy to join or overwrite one with the
+    other. The prefix makes them provably disjoint namespaces.
+
+    Non-positional, for the same reason the VLM id is: Adapter.images()
+    dedupes by URL within an article (adapters.py `seen`), so an image's
+    index can never disambiguate anything -- it can only change when a
+    publisher inserts a photo, which would strand a human's decision.
+    """
+    value = f"{REVIEW_ID_SCHEME}\n{article_url}\n{image_url}".encode("utf-8")
+    return hashlib.sha256(value).hexdigest()[:24]
+
+
+def legacy_review_id(article_url: str, image_url: str, image_index: int) -> str:
+    """The pre-v2 id: sha1 over a pipe-joined, POSITION-DEPENDENT identity.
+
+    Kept solely so the browser can find decisions saved under the old scheme
+    and carry them forward. Decisions live only in localStorage -- there is no
+    server-side copy to migrate -- so removing this would silently orphan
+    every review made before the change. Do not delete it.
+    """
+    identity = f"{article_url}|{image_url}|{image_index}"
+    return hashlib.sha1(identity.encode("utf-8")).hexdigest()[:16]
+
+
 def _safe_remote_url(value: object) -> str:
     url = str(value or "").strip()
     parsed = urlparse(url)
@@ -66,11 +102,12 @@ def load_catalog(data_dir: Path) -> dict:
                 if not image_url:
                     continue
                 caption = str(image.get("caption") or "").strip()
-                identity = f"{article_url}|{image_url}|{image_index}"
-                item_id = hashlib.sha1(identity.encode("utf-8")).hexdigest()[:16]
                 items.append(
                     {
-                        "id": item_id,
+                        "id": review_id(article_url, image_url),
+                        "legacy_id": legacy_review_id(
+                            article_url, image_url, image_index
+                        ),
                         "outlet": str(record.get("outlet") or fallback_outlet),
                         "article_title": str(record.get("title") or "Untitled article"),
                         "article_date": str(record.get("date") or ""),
@@ -99,6 +136,7 @@ def load_catalog(data_dir: Path) -> dict:
     outlets = sorted({item["outlet"] for item in items})
     return {
         "generated_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+        "review_id_scheme": REVIEW_ID_SCHEME,
         "summary": {
             "articles": article_count,
             "images": len(items),

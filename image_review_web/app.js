@@ -1,7 +1,19 @@
 "use strict";
 
 const PAGE_SIZE = 24;
-const STORAGE_KEY = "vlm-flood-image-reviews-v1";
+
+// Decisions live ONLY here -- there is no server-side copy -- so the storage
+// format is versioned and every read is checked against the scheme the server
+// says it is currently emitting. A future id change then surfaces as a visible
+// banner and a migration, never as a review list that silently reads empty.
+const LEGACY_STORAGE_KEY = "vlm-flood-image-reviews-v1";
+const STORAGE_KEY = "vlm-flood-image-reviews-v2";
+const EXPECTED_SCHEME = "human_review_v2";
+
+// Set by loadReviews(), which runs while `state` is still being constructed
+// and therefore cannot write to it.
+let storedScheme = null;
+let migrationDone = false;
 
 const state = {
   items: [],
@@ -44,15 +56,76 @@ const ui = {
 
 function loadReviews() {
   try {
-    const value = JSON.parse(localStorage.getItem(STORAGE_KEY) || "{}");
-    return value && typeof value === "object" ? value : {};
+    const raw = JSON.parse(localStorage.getItem(STORAGE_KEY) || "null");
+    if (!raw || typeof raw !== "object") return {};
+    storedScheme = typeof raw.scheme === "string" ? raw.scheme : null;
+    migrationDone = raw.migrated === true;
+    return raw.reviews && typeof raw.reviews === "object" ? raw.reviews : {};
+  } catch {
+    return {};
+  }
+}
+
+function loadLegacyReviews() {
+  try {
+    const value = JSON.parse(localStorage.getItem(LEGACY_STORAGE_KEY) || "null");
+    return value && typeof value === "object" && !value.reviews ? value : {};
   } catch {
     return {};
   }
 }
 
 function saveReviews() {
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(state.reviews));
+  localStorage.setItem(
+    STORAGE_KEY,
+    JSON.stringify({
+      scheme: EXPECTED_SCHEME,
+      migrated: migrationDone,
+      reviews: state.reviews,
+    }),
+  );
+}
+
+/** Carry pre-v2 decisions onto the new ids, keyed by the server's legacy_id.
+ *
+ *  Runs ONCE: the v2 payload records that it happened, so a decision the user
+ *  later deletes is not resurrected on the next load, and an unmatched leftover
+ *  is not re-reported on every page view. The v1 key is deliberately left in
+ *  place -- if this remap is ever wrong, the originals are still recoverable.
+ *
+ *  Returns null when there was nothing to do, else {moved, orphaned}. */
+function migrateLegacyReviews(items) {
+  if (migrationDone) return null;
+
+  const legacy = loadLegacyReviews();
+  const legacyIds = Object.keys(legacy);
+  if (!legacyIds.length) {
+    migrationDone = true;
+    return null;
+  }
+
+  const byLegacyId = new Map(items.map((item) => [item.legacy_id, item]));
+  let moved = 0;
+  let orphaned = 0;
+  for (const legacyId of legacyIds) {
+    const item = byLegacyId.get(legacyId);
+    if (!item) {
+      orphaned += 1;                      // image no longer in data/outlets
+      continue;
+    }
+    if (!state.reviews[item.id]) {
+      state.reviews[item.id] = legacy[legacyId];
+      moved += 1;
+    }
+  }
+  migrationDone = true;
+  saveReviews();
+  return { moved, orphaned };
+}
+
+function showNotice(text, tone = "info") {
+  const banner = node("p", `storage-notice storage-notice-${tone}`, text);
+  document.querySelector("main").prepend(banner);
 }
 
 function node(tag, className = "", text = "") {
@@ -240,6 +313,7 @@ function exportReviews() {
     .map((item) => ({
       review: state.reviews[item.id],
       id: item.id,
+      id_scheme: EXPECTED_SCHEME,
       outlet: item.outlet,
       article_title: item.article_title,
       article_date: item.article_date,
@@ -289,6 +363,44 @@ fetch("/api/images")
   .then((catalog) => {
     state.items = catalog.items;
     state.summary = catalog.summary;
+
+    // The server is the authority on the current id scheme. Disagreement means
+    // the ids were changed without migrating, so say so loudly rather than
+    // rendering a page that looks like the decisions were never made.
+    const serverScheme = catalog.review_id_scheme || null;
+    if (serverScheme && serverScheme !== EXPECTED_SCHEME) {
+      showNotice(
+        `Review id scheme mismatch: this page expects "${EXPECTED_SCHEME}" but ` +
+        `the server emits "${serverScheme}". Saved decisions will not match ` +
+        `until app.js and image_review_server.py agree.`,
+        "warn",
+      );
+    } else if (storedScheme && storedScheme !== EXPECTED_SCHEME) {
+      showNotice(
+        `Saved decisions use id scheme "${storedScheme}", but this page ` +
+        `expects "${EXPECTED_SCHEME}". They are preserved in localStorage but ` +
+        `are not being shown.`,
+        "warn",
+      );
+    } else {
+      const result = migrateLegacyReviews(catalog.items);
+      if (result && result.moved) {
+        showNotice(
+          `Carried ${result.moved} review decision` +
+          `${result.moved === 1 ? "" : "s"} forward from the previous id ` +
+          `scheme. The old copy is kept under "${LEGACY_STORAGE_KEY}".`,
+        );
+      }
+      if (result && result.orphaned) {
+        showNotice(
+          `${result.orphaned} old review decision` +
+          `${result.orphaned === 1 ? "" : "s"} did not match any image now in ` +
+          `data/outlets and could not be carried forward. They remain under ` +
+          `"${LEGACY_STORAGE_KEY}".`,
+          "warn",
+        );
+      }
+    }
     for (const outlet of catalog.summary.outlets) {
       const option = node("option", "", outlet.toUpperCase());
       option.value = outlet;
