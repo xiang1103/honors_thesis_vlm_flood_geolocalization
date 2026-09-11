@@ -1,8 +1,14 @@
 """Verify scraped news images with a Hugging Face vision-language model.
 
 The script passes remote image URLs to the inference provider. It never
-downloads or saves image files locally. Results are appended to JSONL so an
-interrupted or credit-limited run can be resumed without repeating work.
+downloads or saves image files locally.
+
+Output follows the same two-stage shape as scrape.py: each classification is
+appended to a JSONL as soon as it lands (so a crash or a credit limit loses
+nothing mid-run), and at the end that JSONL is MERGED into the canonical
+image_vlm_verification_final.json and deleted. The canonical JSON is therefore
+the store of record, and the thing a re-run reads to know which images have
+already been paid for. Pass --keep-jsonl to retain the intermediate file.
 """
 
 from __future__ import annotations
@@ -54,13 +60,20 @@ def parse_args() -> argparse.Namespace:
         "--output",
         type=Path,
         default=project_root / "data" / "image_vlm_verification.jsonl",
-        help="Append-only JSONL result file.",
+        help="Intermediate append-only JSONL; merged into --final-output and "
+             "deleted when the run finishes.",
     )
     parser.add_argument(
         "--final-output",
         type=Path,
         default=project_root / "data" / "image_vlm_verification_final.json",
-        help="Canonical JSON with the latest valid result for each occurrence.",
+        help="Canonical JSON with the latest valid result for each occurrence. "
+             "This is the resumable store of record.",
+    )
+    parser.add_argument(
+        "--keep-jsonl",
+        action="store_true",
+        help="Keep the intermediate JSONL instead of deleting it after the merge.",
     )
     parser.add_argument("--model", default=MODEL)
     parser.add_argument(
@@ -92,8 +105,19 @@ def read_articles(path: Path) -> list[dict[str, Any]]:
     return payload
 
 
-def make_occurrence_id(article_url: str, image_index: int, image_url: str) -> str:
-    value = f"{article_url}\n{image_index}\n{image_url}".encode("utf-8")
+def make_occurrence_id(article_url: str, image_url: str) -> str:
+    """Stable identity for one image as it appears in one article.
+
+    Deliberately NOT positional. An earlier scheme hashed the image's index
+    within the article too, so that the same URL used twice in one article
+    stayed two rows -- but Adapter.images() dedupes by URL per article
+    (adapters.py `seen`), and scrape.py's feed-image merge does the same, so
+    that state cannot be emitted. The index bought nothing and made the key
+    change whenever a publisher inserted a photo mid-article, orphaning every
+    classification below it. Caption and index are metadata, not identity:
+    a re-crawl that rewrites a caption must not strand a paid-for result.
+    """
+    value = f"{article_url}\n{image_url}".encode("utf-8")
     return hashlib.sha256(value).hexdigest()[:24]
 
 
@@ -106,9 +130,7 @@ def iter_image_occurrences(data_dir: Path) -> Iterable[dict[str, Any]]:
                 if not image_url:
                     continue
                 yield {
-                    "occurrence_id": make_occurrence_id(
-                        article_url, image_index, image_url
-                    ),
+                    "occurrence_id": make_occurrence_id(article_url, image_url),
                     "image_url": image_url,
                     "caption": image.get("caption") or "",
                     "image_source": image.get("source"),
@@ -126,41 +148,72 @@ def iter_image_occurrences(data_dir: Path) -> Iterable[dict[str, Any]]:
                 }
 
 
-def read_existing_results(
-    output_path: Path,
-) -> tuple[set[str], dict[str, dict[str, str]]]:
-    completed: set[str] = set()
-    url_cache: dict[str, dict[str, str]] = {}
-    if not output_path.exists():
-        return completed, url_cache
+def is_completed(result: Any) -> bool:
+    return (
+        isinstance(result, dict)
+        and result.get("status") == "completed"
+        and result.get("answer") in {"yes", "no"}
+    )
 
-    with output_path.open("r", encoding="utf-8") as handle:
-        for line_number, line in enumerate(handle, start=1):
-            line = line.strip()
-            if not line:
-                continue
-            try:
-                result = json.loads(line)
-            except json.JSONDecodeError:
-                print(
-                    f"Warning: ignoring malformed line {line_number} in {output_path}",
-                    file=sys.stderr,
-                )
-                continue
-            if result.get("status") == "completed" and result.get("answer") in {
-                "yes",
-                "no",
-            }:
-                occurrence_id = result.get("occurrence_id")
-                image_url = result.get("image_url")
-                if occurrence_id:
-                    completed.add(str(occurrence_id))
-                if image_url:
-                    url_cache[str(image_url)] = {
-                        "answer": str(result["answer"]),
-                        "model_output": str(result.get("model_output") or ""),
-                    }
-    return completed, url_cache
+
+def read_existing_results(
+    final_path: Path, history_path: Path
+) -> tuple[dict[str, dict[str, Any]], dict[str, dict[str, str]]]:
+    """Every completed classification still on disk, keyed by occurrence id.
+
+    The canonical JSON is read first because it is the store of record: the
+    history JSONL is deleted once merged, so on a normal re-run the canonical
+    file is the ONLY thing standing between us and paying the provider a second
+    time for images already classified. The JSONL is read second, and wins on
+    conflict, because when it does exist it is a crashed run's un-merged tail.
+    """
+    latest: dict[str, dict[str, Any]] = {}
+    url_cache: dict[str, dict[str, str]] = {}
+
+    def absorb(result: Any) -> None:
+        if not is_completed(result):
+            return
+        occurrence_id = result.get("occurrence_id")
+        if occurrence_id:
+            latest[str(occurrence_id)] = result
+        image_url = result.get("image_url")
+        if image_url:
+            url_cache[str(image_url)] = {
+                "answer": str(result["answer"]),
+                "model_output": str(result.get("model_output") or ""),
+            }
+
+    if final_path.exists():
+        try:
+            payload = json.loads(final_path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError) as exc:
+            raise SystemExit(
+                f"Refusing to run: {final_path} exists but is unreadable ({exc}). "
+                "It is the record of what has already been classified; move it "
+                "aside deliberately if you really mean to start over."
+            )
+        rows = payload.get("results") if isinstance(payload, dict) else None
+        for result in rows or []:
+            absorb(result)
+
+    if history_path.exists():
+        with history_path.open("r", encoding="utf-8") as handle:
+            for line_number, line in enumerate(handle, start=1):
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    result = json.loads(line)
+                except json.JSONDecodeError:
+                    print(
+                        f"Warning: ignoring malformed line {line_number} "
+                        f"in {history_path}",
+                        file=sys.stderr,
+                    )
+                    continue
+                absorb(result)
+
+    return latest, url_cache
 
 
 def extract_http_status(exc: BaseException) -> int | None:
@@ -305,8 +358,18 @@ def write_final_results(
     history_path: Path,
     final_path: Path,
     occurrences: list[dict[str, Any]],
+    known: dict[str, dict[str, Any]] | None = None,
 ) -> dict[str, int]:
-    latest: dict[str, dict[str, Any]] = {}
+    """Merge this run's history into the canonical JSON, atomically.
+
+    MUST merge, not overwrite. `known` holds what the canonical file already
+    contained, so a result whose article has since left the data dir (an outlet
+    file renamed, a narrower --data-dir, an article dropped by a re-crawl) is
+    carried forward rather than silently dropped. Dropping it is unrecoverable
+    now that the history JSONL does not outlive the run, and re-acquiring it
+    means paying the provider again.
+    """
+    latest: dict[str, dict[str, Any]] = dict(known or {})
     if history_path.exists():
         with history_path.open("r", encoding="utf-8") as handle:
             for line in handle:
@@ -317,23 +380,26 @@ def write_final_results(
                     result = json.loads(line)
                 except json.JSONDecodeError:
                     continue
-                if result.get("status") == "completed" and result.get("answer") in {
-                    "yes",
-                    "no",
-                }:
-                    occurrence_id = result.get("occurrence_id")
-                    if occurrence_id:
-                        latest[str(occurrence_id)] = result
+                if is_completed(result) and result.get("occurrence_id"):
+                    latest[str(result["occurrence_id"])] = result
 
-    ordered = [
-        latest[o["occurrence_id"]]
-        for o in occurrences
-        if o["occurrence_id"] in latest
-    ]
+    # Current data-dir order first (that is the order the review site reads),
+    # then anything carried over from earlier runs.
+    ordered: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    for occurrence in occurrences:
+        occurrence_id = occurrence["occurrence_id"]
+        if occurrence_id in latest and occurrence_id not in seen:
+            ordered.append(latest[occurrence_id])
+            seen.add(occurrence_id)
+    ordered.extend(r for oid, r in latest.items() if oid not in seen)
+
     summary = {
         "source_occurrences": len(occurrences),
-        "completed_occurrences": len(ordered),
-        "missing_occurrences": len(occurrences) - len(ordered),
+        "completed_occurrences": len(seen),
+        "missing_occurrences": len(occurrences) - len(seen),
+        "carried_occurrences": len(ordered) - len(seen),
+        "stored_occurrences": len(ordered),
         "yes": sum(r["answer"] == "yes" for r in ordered),
         "no": sum(r["answer"] == "no" for r in ordered),
     }
@@ -351,6 +417,17 @@ def write_final_results(
     return summary
 
 
+def discard_history(history_path: Path, keep: bool) -> None:
+    """Drop the intermediate JSONL. Only ever called after the atomic replace
+    in write_final_results has landed, so the results are already durable."""
+    if keep or not history_path.exists():
+        return
+    try:
+        history_path.unlink()
+    except OSError as exc:
+        print(f"Warning: could not remove {history_path}: {exc}", file=sys.stderr)
+
+
 def main() -> int:
     args = parse_args()
     if args.workers < 1:
@@ -361,7 +438,7 @@ def main() -> int:
         raise SystemExit("--limit must be at least 1")
 
     occurrences = list(iter_image_occurrences(args.data_dir))
-    completed, url_cache = read_existing_results(args.output)
+    completed, url_cache = read_existing_results(args.final_output, args.output)
     pending = [o for o in occurrences if o["occurrence_id"] not in completed]
 
     grouped: dict[str, list[dict[str, Any]]] = {}
@@ -378,9 +455,11 @@ def main() -> int:
         f"Pending: {len(pending)} occurrences."
     )
     if not pending:
-        summary = write_final_results(args.output, args.final_output, occurrences)
-        print(f"Nothing to classify. History: {args.output}")
-        print(f"Canonical results: {args.final_output}")
+        summary = write_final_results(
+            args.output, args.final_output, occurrences, completed
+        )
+        discard_history(args.output, args.keep_jsonl)
+        print(f"Nothing to classify. Canonical results: {args.final_output}")
         print(f"Summary: {summary}")
         return 0
 
@@ -476,9 +555,13 @@ def main() -> int:
         f"yes={counts['yes']}, no={counts['no']}, "
         f"invalid={counts['invalid_output']}, errors={counts['error']}."
     )
-    summary = write_final_results(args.output, args.final_output, occurrences)
-    print(f"History: {args.output}")
+    summary = write_final_results(
+        args.output, args.final_output, occurrences, completed
+    )
+    discard_history(args.output, args.keep_jsonl)
     print(f"Canonical results: {args.final_output}")
+    if args.keep_jsonl:
+        print(f"History kept: {args.output}")
     print(f"Canonical summary: {summary}")
     return 1 if counts["error"] or counts["invalid_output"] else 0
 

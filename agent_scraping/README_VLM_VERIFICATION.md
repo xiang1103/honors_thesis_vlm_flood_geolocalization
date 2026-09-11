@@ -18,10 +18,13 @@ data/outlets/*_flood.json
 agent_scraping/verify_images_vlm.py
         |
         +--> data/image_vlm_verification.jsonl
-        |    append-only history; supports resuming
+        |    intermediate, written and flushed per result so a crash
+        |    mid-run loses nothing; MERGED into the canonical JSON and
+        |    DELETED when the run finishes (--keep-jsonl to retain it)
         |
         +--> data/image_vlm_verification_final.json
-             clean canonical results used by the website
+             canonical results used by the website, and the store of
+             record a later run reads to resume
 ```
 
 The default model is:
@@ -151,9 +154,9 @@ python agent_scraping\verify_images_vlm.py --workers 4
 The default paths are:
 
 ```text
-Input:             data/outlets/*_flood.json
-Resumable history: data/image_vlm_verification.jsonl
-Canonical output:  data/image_vlm_verification_final.json
+Input:              data/outlets/*_flood.json
+Intermediate:       data/image_vlm_verification.jsonl  (deleted after merge)
+Canonical output:   data/image_vlm_verification_final.json  (resumable)
 ```
 
 Four concurrent workers balance throughput and provider pressure. Reduce the
@@ -174,13 +177,18 @@ Run the same command again:
 python agent_scraping\verify_images_vlm.py --workers 4
 ```
 
-Before calling the model, the script reads the JSONL history. Completed image
+Before calling the model, the script reads the canonical JSON, then the
+intermediate JSONL if a previous run crashed before merging it. Completed image
 occurrences are skipped, so an interruption does not require starting over.
 Duplicate image URLs are also reused: the model is called once for the URL and
 the answer is copied to every occurrence of that image.
 
-Do not delete or manually truncate `image_vlm_verification.jsonl` while a run is
-in progress.
+`image_vlm_verification_final.json` is what makes a re-run cheap -- it is the
+only record of which images have already been paid for. Do not delete it, and
+do not delete or truncate `image_vlm_verification.jsonl` while a run is in
+progress. Results for articles that have since left `data/outlets/` are carried
+forward into the canonical JSON rather than dropped, and counted as
+`carried_occurrences` in its summary.
 
 ## 7. Verify completion
 
@@ -226,7 +234,7 @@ Each completed result preserves the article and image metadata and adds:
 
 | Field | Meaning |
 |---|---|
-| `occurrence_id` | Stable ID for this image occurrence in an article |
+| `occurrence_id` | `sha256(article_url, image_url)[:24]`. Identity only -- not the image's position in the article, and not the caption, so a re-crawl that reorders images or rewrites a caption does not strand a paid-for result |
 | `model` | Hugging Face model/provider identifier |
 | `prompt` | Exact prompt used for classification |
 | `status` | `completed`, `invalid_output`, or `error` in the history |
@@ -236,20 +244,23 @@ Each completed result preserves the article and image metadata and adds:
 | `reused_for_duplicate_url` | Whether an earlier classification was reused |
 | `verified_at` | UTC timestamp for the result |
 
-The append-only JSONL history can contain failed attempts or older records. The
+The intermediate JSONL can contain failed attempts or older records. The
 canonical JSON includes only the latest valid completed result for each source
-occurrence, in source order.
+occurrence: those matching the current `data/outlets/` first, in source order,
+then any carried over from earlier runs. Failed and invalid-output attempts are
+never stored as completed, so the next run retries them.
 
 ## Useful options
 
 ```text
 --data-dir PATH       Input directory containing *_flood.json files
---output PATH         Append-only JSONL history path
+--output PATH         Intermediate JSONL path (deleted after the merge)
 --final-output PATH   Canonical JSON result path
 --model MODEL         Hugging Face model/provider identifier
 --workers N           Number of concurrent API calls; default 4
 --limit N             Maximum distinct URLs called during this run
 --retries N           Attempts for transient failures; default 3
+--keep-jsonl          Keep the intermediate JSONL instead of deleting it
 ```
 
 Show the script's current options at any time:

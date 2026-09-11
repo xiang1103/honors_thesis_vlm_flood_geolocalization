@@ -1,5 +1,36 @@
 [
   {
+    "title": "Hurricane Lowell lashes Hawaii, knocking out power to thousands as flood risk continues",
+    "outlet": "cbs",
+    "date": "2026-09-08T17:27:00-0400",
+    "url": "https://www.cbsnews.com/news/hurricane-lowell-power-outages-flood-risk/",
+    "text": "Hurricane Lowell lashes Hawaii, knocking out power to thousands as flood risk continues\nDamaging winds and heavy rains from Hurricane Lowell pelted Hawaii's western islands early Tuesday, knocking out power, damaging roads and buildings and bringing the threat of flash floods and mudslides.\nFierce winds downed trees and caused widespread power outages on the island of Kauai, home to 73,000 residents. The Kauai Island Utility Cooperative reported that nearly all of its members were without power early Tuesday. The small Kauai community of Hanalei had already recorded the highest rainfall totals so far, with 17.76 inches of rain.\nAccording to utility tracker PowerOutage.us, about 42,000 customers were without power across all of Hawaii as of 1:30 p.m. local time Tuesday.\nBoulders and storm debris were blocking many roads in Kauai, isolating people in their neighborhoods. CBS News cameras captured the aftermath of the destruction caused when a waterfront home in Kauai was lifted off its foundation and moved across the street.\nTourist Dave Reed rode out the storm with family and friends who were visiting for a wedding.\n\"It was actually pretty scary,\" Reed told CBS News. \"I always said I want to ride out a hurricane. I never want to do it again.\"\nHe added: \"I wish we would have left. We had an opportunity to leave and we didn't.\"\nAndrew Davis Henry of Kauai is diabetic and is looking for ice to keep his insulin cold.\n\"I need that to live, so if I don't have that, it's going to be a bad day for me,\" Henry told CBS News, adding that he has no cell service or power.\nEmergency officials asked residents to stay off the roads as damage assessments were just beginning.\n\"As the light comes up and the extent of the damage from Hurricane Lowell comes into focus, we want to ensure that no additional emergency situations arise unnecessarily,\" said Elton Ushio, administrator of the local emergency management agency.\nThe center of the storm passed west of the islands early Tuesday and was moving away, but tropical storm-force winds extended well beyond, the Miami-based National Hurricane Center said. On Kauai, sustained winds measured just above 50 mph at Lihue Airport.\nHurricane warnings for Kauai and the tiny island of Niihau, which has fewer 100 permanent residents, were no longer in place by Tuesday morning local time. A tropical storm warning was also lifted for Oahu, the state's most populated island with close to 1 million residents.\nBut flooding and mudslides will continue to be a risk through the day, said Eric Blake of the National Hurricane Center.\nSome wind gusts reached 80 mph, according to the hurricane center. But the force of the sustained winds had decreased by early Tuesday and the storm was expected to weaken in the coming days.\nIn its latest advisory late Tuesday morning local time, the hurricane center said that Lowell had maximum sustained winds of 75 mph and was moving north at 15 mph. It was centered about 230 miles northwest of Lihue, Hawaii.\nA tropical storm is classified as a Category 1 hurricane when its maximum sustained winds reach 74 mph.\nRoad crews were clearing sand and rocks from a major route along Oahu's western edge after floodwaters topped a coastal highway, north of Honolulu.\nHawaii Gov. Josh Green closed schools and government offices on the three islands for Tuesday ahead of the storm.\nRainfall totals could reach up to 24 inches in some areas on Kauai. Oahu, Maui and the Big Island also could see large amounts of rain.\nLowell \"may produce areas of flooding for urban and low-lying regions, with significant flash flooding and mudslides possible across portions of the Big Island,\" the hurricane center said.\nLast month, Hurricane Lala brushed past Hawaii and stirred up landslides, washing away about 100 homes and causing widespread power outages.",
+    "images": [
+      {
+        "url": "https://assets1.cbsnewsstatic.com/hub/i/r/2026/09/08/294470c2-8bc4-412f-b8c1-de4d0ddfff7e/thumbnail/620x349/c3ce9b46f6ed919cf2cc91228197cc0e/1788910928543.png",
+        "caption": "Damage caused by Hurricane Lowell on the Hawaiian island of Kauai. Sept. 8, 2026. CBS News",
+        "source": "figure"
+      },
+      {
+        "url": "https://assets2.cbsnewsstatic.com/hub/i/r/2026/09/08/cf563bdd-e454-474c-b99d-b87aebb4cdb8/thumbnail/620x349/6f568785f2c464841f8641ad452e9013/1788910911645.png",
+        "caption": "A home on the Hawaiian island of Kauai was moved off its foundations by Hurricane Lowell. Sept. 8, 2026. CBS News",
+        "source": "figure"
+      }
+    ],
+    "videos": [
+      {
+        "url": "https://prod.vodvideo.cbsnews.com/cbsnews/vr/hls/4805595_hls/master.m3u8",
+        "caption": "Fierce winds downed trees and caused widespread power outages on the island of Kauai, home to 73,000 residents.",
+        "thumbnail": null,
+        "duration_s": null,
+        "source": "og"
+      }
+    ],
+    "flood_score": 0.88,
+    "flood_verified": true,
+    "scraped_at": "2026-09-10T22:24:38+00:00"
+  },
+  {
     "title": "Hurricane Lowell passing just west of Hawaii, bringing heavy rain, strong winds, punishing waves",
     "outlet": "cbs",
     "date": "2026-09-08T05:55:00-0400",

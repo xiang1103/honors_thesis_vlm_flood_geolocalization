@@ -38,7 +38,7 @@ import trafilatura
 from lxml import html as lhtml
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from adapters import ADAPTERS, get_adapter   # noqa: E402
+from adapters import ADAPTERS, IMAGE_OUTLETS, get_adapter   # noqa: E402
 from verify import score_record           # noqa: E402
 
 #: Canonical key order for every emitted record. Human-facing fields first
@@ -164,9 +164,28 @@ def clean_text(txt):
 
 
 def scrape_article(session, url, adapter):
+    # feed_only outlets are ones whose article page is KNOWN to be unfetchable
+    # (NYT 403s, the Washington Post times out). Attempting it anyway costs
+    # three retries with backoff per article -- ~75s each against WaPo -- to
+    # learn what the adapter already told us. Go straight to the feed record.
+    if getattr(adapter, "feed_only", False):
+        rec = adapter.fallback_record(url)
+        if rec is None:
+            return None
+        rec["scraped_at"] = datetime.now(timezone.utc).isoformat(timespec="seconds")
+        return score_record(rec)
+
     r = fetch(session, url)
     if r is None:
-        return None
+        # NYT/WaPo block the article page outright. Their public feed already
+        # gave us headline, date, summary and (for NYT) a captioned image, so
+        # a failed fetch is not the end of the record for those outlets.
+        fallback = getattr(adapter, "fallback_record", None)
+        rec = fallback(url) if fallback else None
+        if rec is None:
+            return None
+        rec["scraped_at"] = datetime.now(timezone.utc).isoformat(timespec="seconds")
+        return score_record(rec)
     try:
         doc = lhtml.fromstring(r.content)
     except Exception as e:
@@ -176,6 +195,11 @@ def scrape_article(session, url, adapter):
     title, date = extract_title_date(doc, jl)
     text = clean_text(trafilatura.extract(r.text, include_comments=False) or "")
     images = adapter.images(doc, url)
+    # Additive: a feed-supplied image the page itself didn't expose.
+    feed_images = getattr(adapter, "feed_images", None)
+    if feed_images:
+        have = {i["url"] for i in images}
+        images += [i for i in feed_images(url) if i["url"] not in have]
     videos = adapter.videos(doc, url, jl)
     rec = {
         "title": title,
@@ -379,7 +403,11 @@ def main():
     ap = argparse.ArgumentParser(description=__doc__,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--outlets", default="all",
-                    help="comma list (cbs,fox,ap,nbc,npr,cnn) or 'all'")
+                    help="comma list of outlet names, 'all' (every registered "
+                         "outlet), or 'images' (only those measured to yield "
+                         "captioned images). See --list-outlets.")
+    ap.add_argument("--list-outlets", action="store_true",
+                    help="print every registered outlet with its expected ceiling, then exit")
     ap.add_argument("--max-pages", type=int, default=200, help="listing pages per outlet")
     ap.add_argument("--limit", type=int, default=5000, help="max articles per outlet")
     ap.add_argument("--since-days", type=int, default=365,
@@ -397,8 +425,20 @@ def main():
     ap.add_argument("--min-images", type=int, default=0)
     args = ap.parse_args()
 
-    names = sorted(ADAPTERS) if args.outlets == "all" else \
-        [x.strip() for x in args.outlets.split(",") if x.strip()]
+    if args.list_outlets:
+        print(f"{'outlet':16s} {'ceiling':>8s}  note")
+        for n in sorted(ADAPTERS):
+            a = get_adapter(n)
+            print(f"{n:16s} {a.expected_ceiling or 0:>8d}  "
+                  f"{getattr(a, 'note', '') or (a.__doc__ or '').strip().split(chr(10))[0][:70]}")
+        return
+
+    if args.outlets == "all":
+        names = sorted(ADAPTERS)
+    elif args.outlets == "images":
+        names = sorted(IMAGE_OUTLETS)
+    else:
+        names = [x.strip() for x in args.outlets.split(",") if x.strip()]
     os.makedirs(args.data_dir, exist_ok=True)
     if args.image_dir is None:
         args.image_dir = os.path.join(args.data_dir, "images")
@@ -414,13 +454,13 @@ def main():
             log(f"{n}: FAILED {type(e).__name__}: {e}")
 
     print("\n" + "=" * 68)
-    print(f"{'outlet':8s} {'records':>8s} {'images':>8s} {'videos':>7s} {'verified':>9s}")
+    print(f"{'outlet':15s} {'records':>8s} {'images':>8s} {'videos':>7s} {'verified':>9s}")
     print("-" * 68)
     for s in summaries:
-        print(f"{s['outlet']:8s} {s['records']:>8d} {s['images']:>8d} "
+        print(f"{s['outlet']:15s} {s['records']:>8d} {s['images']:>8d} "
               f"{s['videos']:>7d} {s['verified']:>9d}")
     print("-" * 68)
-    print(f"{'TOTAL':8s} {sum(s['records'] for s in summaries):>8d} "
+    print(f"{'TOTAL':15s} {sum(s['records'] for s in summaries):>8d} "
           f"{sum(s['images'] for s in summaries):>8d} "
           f"{sum(s['videos'] for s in summaries):>7d} "
           f"{sum(s['verified'] for s in summaries):>9d}")

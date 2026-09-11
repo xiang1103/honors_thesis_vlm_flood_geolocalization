@@ -15,3 +15,6 @@ venv/
 .env
 *.pem
 *.key
+# Crawl logs and in-progress crawl state
+data/logs/
+data/outlets/*.jsonl

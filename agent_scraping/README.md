@@ -1,12 +1,33 @@
 # agent_scraping — flood news dataset (direct outlet scraping)
 
-Scrapes US news outlets for flood articles with **text + captioned images**,
-for a VLM flood-geolocalization dataset. Sibling of `../scraping_api/`, which
-discovers articles through the GDELT API instead.
+Scrapes **29 news outlets** worldwide for flood articles with **text +
+captioned images**, for a VLM flood-geolocalization dataset. Sibling of
+`../scraping_api/`, which discovers articles through the GDELT API instead.
 
-**Outlet: CBS News**, chosen by measurement, not assumption — see
-[design.md](design.md) for the 8-outlet bake-off. AP and NBC are implemented as
-secondary adapters.
+Outlets are chosen by measurement, not assumption: ~60 candidates were probed
+and 29 kept. See [design.md](design.md) for the bake-off, the rejected outlets
+(and why, so they aren't retried), and the extraction bugs the expansion
+exposed.
+
+```bash
+$PY scrape.py --list-outlets      # every outlet, its ceiling, and its quirk
+```
+
+**The paywalled US majors are a special case.** NYT, WSJ and the Washington
+Post all refuse a direct article fetch (403 / 401 / connection timeout). NYT
+and WaPo are therefore reached through their **public RSS feeds** and marked
+`feed_only`: the feed item *is* the record. NYT's feeds carry a real image with
+a real caption, which is the product; WaPo's carry no media, so it is
+text-only. **WSJ is not included** — its site 401s and its feed has not updated
+since January 2025, so there is no route that collects anything. Both feed
+outlets are recent-only; run them repeatedly to accumulate.
+
+**Highest-volume outlets:** `cbs` (~2,500), `guardian` (~2,000, deepest non-US
+archive), `hindustantimes` (~900), `floodlist` (~800, a dedicated flood site),
+`premiumtimes` (~600), `rnz` (~500). The rest are lower-volume sources kept for
+geographic diversity — floods are a global story, and US outlets cover South
+Asian, West African and Southeast Asian events thinly and without local
+photography.
 
 ## Quick start
 
@@ -16,8 +37,11 @@ PY=/home/liu47/conda_envs/newEnv_local/bin/python3   # project env (py3.10, requ
 # every outlet, last year, capped at 5000/outlet -> data/{outlet}_flood.json
 $PY scrape.py --outlets all --since-days 365 --limit 5000
 
-# one outlet
-$PY scrape.py --outlets cbs
+# only outlets that actually yield captioned images (the VLM-relevant subset)
+$PY scrape.py --outlets images
+
+# one or more named outlets
+$PY scrape.py --outlets cbs,guardian,cna
 
 # resume an interrupted run
 $PY scrape.py --outlets all --resume
@@ -33,11 +57,41 @@ Each outlet writes **`data/outlets/{outlet}_flood.json`** — a single pretty-pr
 JSON array, sorted newest-first. The intermediate `.jsonl` is deleted on
 completion (`--keep-jsonl` to retain it).
 
+### Long crawls: run it in tmux
+
+A full crawl is hours, so run it detached — it then survives an SSH
+disconnect (closing a laptop lid, dropping VPN, ending the shell):
+
+```bash
+./run_crawl.sh                        # every outlet, resumable
+OUTLETS=images ./run_crawl.sh         # only outlets that yield captioned images
+OUTLETS=guardian,cna ./run_crawl.sh   # a subset
+SINCE_DAYS=730 LIMIT=3000 ./run_crawl.sh
+```
+
+```bash
+tmux attach -t flood-scrape           # watch it   (detach: Ctrl-b then d)
+tail -f ../data/logs/crawl_latest.log # watch it without attaching
+tmux ls                               # is it still running?
+tmux kill-session -t flood-scrape     # stop it
+```
+
+The pane is kept open after the crawl exits, so the final summary table is
+still there when you attach later. The run passes `--resume`, so killing it
+and re-running picks up where it left off rather than re-fetching.
+
+> **tmux survives a dropped connection, not a suspended machine.** If you SSH
+> into this box from your laptop, closing the lid is exactly the case tmux
+> handles. If this box *is* the laptop, closing the lid suspends the CPU and
+> the crawl pauses until you reopen it — use `caffeinate` (macOS) or disable
+> lid-suspend (Linux) if you need it to keep running locally.
+
 ### Key options
 
 | flag | default | meaning |
 |---|---|---|
-| `--outlets` | `all` | `cbs,fox,ap,nbc,npr,cnn` or `all` |
+| `--outlets` | `all` | comma list, `all`, or `images` (only outlets measured to yield captioned images — excludes the two text-only ones) |
+| `--list-outlets` | off | print every outlet with its expected ceiling, then exit |
 | `--data-dir` | `data/outlets` | where the per-outlet JSON files go |
 | `--since-days` | `365` | date window; `0` disables |
 | `--limit` | `5000` | max articles per outlet |
@@ -57,6 +111,24 @@ No API key, no headless browser, no `bs4`/`feedparser`.
 | `verify.py` | zero-token flood scoring; also a standalone audit CLI |
 | `export.py` | filter/convert a dataset (`--verified-only`, `--min-images`) |
 | `design.md` | why CBS, the measurements, and the scope decisions |
+
+## Adding another outlet
+
+Most outlets need no code — append a dict to `TAG_OUTLETS` in `adapters.py`:
+
+```python
+dict(name="example", host="https://example.com",
+     indexes=[("https://example.com/tag/flood",            # page 1, verbatim
+               "https://example.com/tag/flood/page/{n}")], # None if it can't paginate
+     article_re=r"example\.com/20\d\d/[a-z0-9-]+",
+     expected_ceiling=100,
+     keyword=True,      # only if the index is a broad weather/climate section
+     note="what's odd about this outlet")
+```
+
+Verify the route first — index returns 200 with real links, page 2 yields
+articles page 1 did not, and an article actually yields captioned images.
+`design.md` lists the two probe bugs that produce convincing false negatives.
 
 ## Output
 
@@ -121,19 +193,66 @@ One JSON object per line (JSONL, appended — so a crawl is resumable):
 }
 ```
 
-## Measured results (20-page run, 157 articles)
+## Measured results — full 29-outlet crawl (2026-09-10)
 
-| metric | value |
-|---|---|
-| articles scraped | 157 (0 failures, 0 bot blocks) |
-| with >=1 captioned image | 111 (71%) |
-| total captioned images | 309 (avg 1.97/article, max 14) |
-| `flood_verified` | 149 (95%) |
-| title / date coverage | 157/157 (100%) |
-| median article text | 3,767 chars |
-| median caption length | 151 chars |
+| metric | before (6 outlets) | after (29 outlets) |
+|---|---|---|
+| records | 949 | **5,889** |
+| captioned images | 1,624 | **8,677** |
+| records with >=1 image | — | 4,017 (68%) |
+| `flood_verified` | — | 4,445 (75%) |
+| median caption length | 151 | 102 chars |
+| median article text | 3,767 | 2,393 chars |
 
-Projected full crawl (~120 pages): **~900–1,400 articles**.
+Window: `--since-days 365`, except FloodList (an archive — see below).
+
+| outlet | records | images | img/article | verified |
+|---|---|---|---|---|
+| floodlist | 3,477 | 4,227 | 1.2 | 3,104 |
+| cbs | 851 | 1,458 | 1.7 | 505 |
+| rnz | 345 | 1,020 | 3.0 | 183 |
+| guardian | 253 | 795 | 3.1 | 219 |
+| premiumtimes | 389 | 154 | 0.4 | 7 |
+| hindustantimes | 96 | 150 | 1.6 | 93 |
+| independent | 71 | 137 | 1.9 | 60 |
+| abcau | 25 | 114 | 4.6 | 18 |
+| fox | 47 | 111 | 2.4 | 30 |
+| grist | 28 | 98 | 3.5 | 16 |
+| jakartapost | 62 | 79 | 1.3 | 29 |
+| cna | 25 | 56 | 2.2 | 23 |
+| globalnews | 16 | 39 | 2.4 | 10 |
+| toi | 30 | 36 | 1.2 | 30 |
+| pbs | 31 | 33 | 1.1 | 29 |
+| nbc | 19 | 29 | 1.5 | 11 |
+| npr | 14 | 27 | 1.9 | 9 |
+| aljazeera | 8 | 23 | 2.9 | 8 |
+| ap | 34 | 23 | 0.7 | 33 |
+| nytimes | 21 | 17 | 0.8 | 7 |
+| insideclimate | 6 | 16 | 2.7 | 0 |
+| newsweek | 10 | 16 | 1.6 | 4 |
+| latimes | 6 | 9 | 1.5 | 4 |
+| ctv | 5 | 4 | 0.8 | 2 |
+| straitstimes | 4 | 3 | 0.8 | 2 |
+| cnn | 2 | 2 | 1.0 | 1 |
+| usatoday | 11 | 1 | 0.1 | 8 |
+| washingtonpost | 3 | 0 | 0.0 | 0 |
+| **TOTAL** | **5,889** | **8,677** | **1.5** | **4,445** |
+
+**Caption density beats volume as a quality signal.** ABC Australia averages
+**4.6** captioned images per article, CNA 3.6, Grist 3.5, Guardian 3.1 — all
+well above CBS's 1.7. The small international outlets contribute far more per
+article than their record counts suggest.
+
+Three outlets behaved differently than their probe predicted, and the notes in
+`TAG_OUTLETS` were corrected to match:
+
+- **floodlist stopped publishing in May 2024.** With a 1-year window it yields
+  **1** record. Crawled as an archive (`SINCE_DAYS=0`) it yields **3,477
+  records / 3,624 images / 89% verified** — the largest single source here.
+- **irishtimes yields 0** — no static `<img>` in its figures, and its flooding
+  tag surfaces 2016-era articles. Documented dead end.
+- **usatoday** has a flood-dense weather section but almost no captions: 11
+  records produced 1 image.
 
 ## Why there is no Claude-agent verification step
 
@@ -163,5 +282,12 @@ a thousand.
   images, no CSS backgrounds. Adding Playwright was judged not worth it.
 - **29% of articles have no captioned image** — many CBS flood stories are
   text/video-only. Use `--min-images 1` to keep only image-bearing ones.
-- **AP/NBC adapters are low-volume** (~27 and ~5 articles): their listing pages
-  don't paginate without JS. They exist for source diversity, not scale.
+- **Many outlets are low-volume by construction.** AP, NBC, Al Jazeera,
+  Straits Times, Global News, CTV and Inside Climate News all paginate via
+  JavaScript, so one static page is genuinely all there is (8–25 articles).
+  They exist for source diversity, not scale.
+- **Two outlets are text-only:** `irishtimes` (its `<figure>`s carry no static
+  `<img>`) and `premiumtimes` (no `<figcaption>` anywhere). Both still produce
+  good article text and are excluded from the `--outlets images` preset.
+- **AP intermittently returns HTTP 403** to datacenter IPs. Non-fatal — the
+  crawler logs and skips, per the retry policy above.

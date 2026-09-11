@@ -54,7 +54,18 @@ def score_record(rec):
 
     s = max(0.0, min(1.0, s))
     rec["flood_score"] = round(s, 3)
-    rec["flood_verified"] = bool(s >= 0.35 and strong_b >= 2)
+
+    # The `strong_b >= 2` floor exists to stop a long article with one passing
+    # "flood" mention from verifying. It assumes a full article body -- which
+    # feed-only outlets (NYT, Washington Post) do not have: their text is a
+    # ~150-character summary, so a genuine flood story like "Nepal's Flood
+    # Relief Workers Feel the Pain of Trump's Cuts" scored 0.63 and still
+    # failed to verify. Scale the requirement to the body actually available:
+    # in a short body, a flood headline plus one strong body term is as much
+    # evidence as the text can carry.
+    short_body = words < 60
+    enough = strong_b >= 2 or (short_body and strong_b >= 1 and strong_t)
+    rec["flood_verified"] = bool(s >= 0.35 and enough)
     return rec
 
 

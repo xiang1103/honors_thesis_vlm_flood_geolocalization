@@ -1,4 +1,4 @@
-# Agent Scraping — Direct Outlet Scraper (CBS News)
+# Agent Scraping — Direct Outlet Scraper (24 outlets)
 
 Design + rationale for the direct-from-outlet flood dataset scraper.
 Complements `../scraping_api/` (GDELT-API-based discovery). Read this before
@@ -200,6 +200,310 @@ Filter on `flood_verified` downstream to get the strict subset.
 out-of-window articles" counter would trip on the first tag's old tail and
 discard every later tag. Adapters therefore declare `chronological`; the early
 stop applies only when it is `True`. CBS and AP set it `False`.
+
+
+## The 50-outlet bake-off (expansion beyond the original six)
+
+The original six outlets were all US national news. That is a narrow base for a
+flood dataset: the largest flood events of any year happen in South Asia, West
+Africa and Southeast Asia, and US outlets cover them thinly and without local
+photography. So **50 candidate outlets were probed** and 18 were added, taking
+the registry from 6 to 24.
+
+Every route below was verified against the live site. The probes are
+reproducible: fetch the index, count links matching the article pattern across
+pages 1/2/3/10, and check whether page 2 yields anything page 1 did not.
+
+### Two methodology bugs worth recording
+
+Both produced confident, wrong conclusions before being caught:
+
+1. **Advertising Brotli without being able to decode it.** Adding
+   `Accept-Encoding: gzip, deflate, br` to look more browser-like made servers
+   return Brotli, which `requests` cannot decode unless the `brotli` package is
+   installed (it is not, in this env). `lxml` then parsed binary noise and
+   reported **zero links on pages that were fine** — Global News "dropped" from
+   308KB/9 links to 45KB/0. **Never advertise `br` here.**
+2. **Regexes anchored with `/$` after the URL had its trailing slash stripped.**
+   Silently zeroed Grist and CTV. A discovery pattern that returns 0 is
+   indistinguishable from a dead site, so a zero result must be confirmed by
+   looking at the actual hrefs before the outlet is written off.
+
+### Outlets added (18)
+
+Grouped by the only thing that really varies: how deep the archive goes.
+
+| outlet | route | new articles/page | note |
+|---|---|---|---|
+| **guardian** | `/environment/flooding?page=N` + `/world/natural-disasters?page=N` | ~15 | deepest non-US archive; verified to page 40 (reaches 2024) |
+| **hindustantimes** | `/topic/flood/page/N` | ~30 | keyword filter required — topic page mixes in horoscopes |
+| **floodlist** | 5 regions x `/page/N` | ~16 | a dedicated flood site; every article on-topic by construction |
+| **rnz** | `/news/weather?page=N` | ~24 | no flood tag; broad section, keyword-filtered |
+| **premiumtimes** | `/tag/flood/page/N` | ~25 | Nigeria; **text-only** |
+| **irishtimes** | `/tags/flooding/N/` | ~50 | **text-only** |
+| **grist** | `/extreme-weather/page/N/` | ~14 | pagination advertised to page 80 |
+| **pbs** | `/tag/flooding/page/N` + `/tag/floods/page/N` | ~9 | |
+| **cna** | `/topic/flood?page=N` | ~12 | richest captions measured — 7 on one story |
+| **jakartapost** | `/tag/flood/page/N` | ~10 | Indonesia |
+| independent | `/topic/flooding` | 71 (one page) | densest single page found; `?page=N` 404s |
+| toi | `/topic/flood/news` | 68 (one page) | |
+| abcau | `/news/topic/floods` | 25 (one page) | |
+| globalnews / ctv | tag / climate section | 16 / 15 | Canada |
+| aljazeera | `/tag/floods/` | 8 (one page) | strong photo essays, incl. `/gallery/` |
+| straitstimes | `/tags/floods` | 11 (one page) | |
+| insideclimate | `/tag/flooding/` | 13 (one page) | |
+
+The bottom group's "load more" is JavaScript, so one static page is genuinely
+all there is. They are kept for **source diversity**, not volume — the same
+rationale as the existing NBC/CNN adapters.
+
+### Outlets rejected, and why (so they are not retried)
+
+| outlet | verdict |
+|---|---|
+| Reuters | HTTP 401 on every request |
+| Bloomberg, The Hill, Axios, AccuWeather, Mongabay, NDTV, Firstpost, phys.org, France24, news.com.au, Sky News | HTTP 403 — bot wall, full browser headers did not help |
+| Newsweek, Euronews | HTTP 406 |
+| **NYT** | topic page *is* statically paginated and looked ideal — but every article fetch 403s. Discovery without extraction is useless |
+| Dawn, SCMP, DW, Yale Climate, ABC News (US), BBC topic pages | no static flood index found (404 on every candidate path) |
+| Mirror / Metro / WalesOnline / Express (Reach plc) | `/all-about/{tag}` 404s |
+| The Hindu, Deccan Herald, Indian Express, Jakarta *Post* tag rivals, Arab News, Gulf News, SMH, Stuff, AllAfrica, UPI, ScienceDaily, Bangkok Post, The Star (MY) | HTTP 200 but zero flood links in static HTML (JS-rendered index) |
+
+**BBC** deserves a note: its news sitemap index resolves and its topic pages
+return 200, but the flood topic IDs are opaque hashes with no discoverable
+mapping, and the sitemap covers only ~48 hours. Same structural problem as CNN,
+already documented above.
+
+
+## The paywalled US majors — NYT, WSJ, Washington Post
+
+These were requested explicitly, so the negative results matter as much as the
+positive ones. Each was probed **sequentially, with full browser headers and a
+`Referer`** — not in a concurrent burst, so rate limiting is not the
+explanation.
+
+| outlet | index page | article fetch | verdict |
+|---|---|---|---|
+| **NYT** | 200 — `/topic/subject/floods` even paginates statically | **403** | discovery works, extraction doesn't |
+| **WSJ** | **401** on every section tried | n/a | hard auth wall |
+| **Washington Post** | **connection timeout**, repeatedly | n/a | edge drops datacenter clients |
+
+Discovery without extraction is worthless, so direct scraping is out for all
+three. What *does* work is the channel each publisher operates for
+redistribution — their **public RSS feeds**:
+
+| feed | status | carries |
+|---|---|---|
+| NYT (Climate/World/US/Science/AsiaPacific) | 200, ~50 items each | title, date, ~150-char summary, **`media:content` image + `media:description` caption** |
+| Washington Post (national/world/local) | 200, 15–23 items | title, date, ~150-char summary. **No media at all** |
+| WSJ (`RSSWorldNews`) | 200 but **stale** — items dated Jan 2025; `RSSUSnews` 403 | unusable |
+
+So:
+
+- **`nytimes` is added as a feed-only adapter** and is genuinely useful: the
+  feed hands over a real image paired with a real caption
+  (*"Flooding in Penn Station, Aug. 20."*), which is exactly the product. What
+  it does **not** give is body text — `text` is the feed summary, ~150 chars
+  rather than ~4,000.
+- **`washingtonpost` is added as feed-only and text-only.** No images. It is
+  excluded from the `--outlets images` preset.
+- **WSJ is not added.** There is no working route: the site 401s and the feed
+  has not updated since January 2025. Adding a stub that collects nothing
+  would be worse than leaving it out.
+
+Both feed outlets are **recent-only** (a feed is a window on the last few
+days), so they cannot backfill a year. Run them repeatedly to accumulate.
+
+### The structural change this forced
+
+Every other adapter assumes `discover()` yields URLs and `scrape_article()`
+then fetches them. For NYT the fetch can never succeed, so the **feed item is
+the record**. `RSSAdapter` stashes the parsed item in `self.meta[url]` and
+exposes `fallback_record(url)`; `scrape_article()` calls it when the fetch
+returns `None`. `feed_images()` is the additive counterpart for outlets that
+*do* fetch — a feed image the page itself didn't expose is merged in.
+
+### A scoring bug this exposed
+
+`verify.score_record()` required `strong_b >= 2` — two flood terms in the body
+— to set `flood_verified`. That floor assumes a full article. On a 150-char
+feed summary it systematically under-verified: *"Nepal's Flood Relief Workers
+Feel the Pain of Trump's Cuts to U.S.A.I.D."* scored **0.63 and still failed**.
+
+The requirement now scales with the body actually available: in a body under
+60 words, a flood term in the headline plus one in the body is as much
+evidence as the text can carry. Re-scoring all 1,202 existing records with the
+new rule changes **zero** verdicts — it only affects bodies too short to have
+ever met the old floor.
+
+## US majors that *do* allow direct scraping
+
+Found while probing the paywalled three, and added:
+
+| outlet | index | note |
+|---|---|---|
+| **latimes** | `/environment`, `/california`, `/weather` | articles fetch cleanly with captioned images; no flood tag, so keyword-filtered |
+| **usatoday** | `/news/weather/`, `/news/nation/` | weather section is flood-dense (11 of 22 links) |
+| **newsweek** | `/weather` | `/topic/flooding` 406s but `/weather` serves fine |
+
+**NBC was also fixed rather than added.** Its adapter discovered ~5 articles
+from `/news/weather`. The section fronts `/weather` and `/hurricanes` yield
+~50 between them, and NBC article URLs all carry an `rcna` id — a far more
+reliable test than requiring the literal path `/news/`. Ceiling raised 10 → 50.
+
+Rejected here: ABC News and TIME (0 article links in static HTML), Christian
+Science Monitor (article links redirect to `/auth/sso_login`).
+
+
+## Measured results of the full 29-outlet crawl
+
+Run 2026-09-10, `--since-days 365` (FloodList separately with the window off).
+These are **measurements, not ceilings** — the `expected_ceiling` values in
+`TAG_OUTLETS` were corrected against them.
+
+| | before (6 outlets) | after (29 outlets) |
+|---|---|---|
+| records | 949 | **5,889** |
+| captioned images | 1,624 | **8,677** |
+| records with >=1 image | — | 4,017 (68%) |
+| `flood_verified` | — | 4,445 (75%) |
+
+Top sources by captioned images: floodlist 4,227 · cbs 1,458 · rnz 1,020 ·
+guardian 795 · premiumtimes 154 · hindustantimes 150 · independent 137 ·
+abcau 114 · fox 111.
+
+**Caption density** (images per article) is a better quality signal than raw
+count, and it does not track outlet size: **abcau 4.6**, cna 3.6, grist 3.5,
+guardian 3.1, rnz 3.0, aljazeera 2.9 — all well above CBS's 1.7. The small
+international outlets punch far above their volume.
+
+### A `--limit` cap that silently truncated the best source
+
+FloodList discovered **3,477** articles but the run passed `--limit 3000`, so
+477 were never fetched -- and nothing in the output said so. The crawl
+reported success. Finding it needed a separate check: compare the
+"(total N)" discovery line against the "N new articles to fetch" line in the
+log, per outlet. Topping up recovered 476 records and 603 images.
+
+Guardian shows the same shape in the log (1,882 discovered, 1,200 fetched) but
+is genuinely exhausted: of those 1,200, **zero** fell inside the 1-year window,
+so the remaining 429 are older still. `--limit` truncation and window
+exhaustion look identical in the summary line; only the kept-vs-skipped split
+tells them apart.
+
+### Three outlets behaved differently than the probe predicted
+
+- **FloodList stopped publishing in May 2024.** Its most recent article is
+  2024-05-13, so `--since-days 365` discarded 1,199 of 1,200 articles and kept
+  **one**. Re-run with the window disabled it yields **3,477 records / 4,227
+  images / 89% verified** — the single largest source in the dataset. It is an
+  *archive*, not a live feed, and must be crawled as one.
+- **Irish Times yields literally nothing** (0 records). Its `<figure>`s carry
+  no static `<img>`, *and* the flooding tag surfaces 2016-era articles, so a
+  1-year window keeps none of them. Recorded as a dead end.
+- **Premium Times is mostly-text, not text-only** as first labelled: 389
+  records but only 32 carry an image. Kept for text and geographic coverage.
+
+### A silent data-corruption bug the audit caught
+
+Auditing the collected data (not the code) surfaced something the per-article
+spot checks had missed: CNA was emitting
+`mc_core_theme/images/inbox-large.png` — a site **icon** — carrying a real
+flood caption, 16 times. A right caption on a wrong image is worse than no
+image at all: it is silently corrupt supervision that no downstream filter
+would catch.
+
+Cause: the proximity-caption fallback (added for PBS/RNZ, which ship no
+`<figcaption>`) attached the caption to whichever `<img>` was nearby. Two
+fixes:
+
+1. The fallback now only accepts a caption from a block containing **exactly
+   one** `<img>`. If a block holds several, which one the caption belongs to
+   is unknowable, so no caption is claimed.
+2. CMS theme/chrome directories (`/theme/`, `/themes/`, `/chrome/`, `/ui/`)
+   are treated as junk URLs.
+
+Impact was confined to CNA (32 of 90 images; every other outlet was clean),
+which was re-crawled. PBS, RNZ, TOI and Guardian keep their captions
+unchanged, so the guard cost nothing where the fallback was doing real work.
+
+**Audit the data, not just the extractor.** Every one of these three findings
+came from scanning the output — dates, duplicate URLs, URL shapes — and none
+of them would have shown up in a spot check of two articles per outlet.
+
+## Extraction fixes forced by the new outlets
+
+Adding outlets exposed three real bugs in the shared extractor. All three were
+**false negatives** — images silently dropped — so they cost yield on the
+original six outlets too, invisibly.
+
+### 1. The recirculation walk climbed out of the article
+
+`is_recirculation()` walked up to 12 ancestors looking for promo/furniture
+class names. On PBS the walk reached
+`div.page__body--with-sidebar` — a page *layout* wrapper whose class contains
+the substring `sidebar` — and rejected **every photo on the site**. PBS scored
+0 captioned images until this was found.
+
+Fix: the walk now takes `stop_at=<body element>` and stops there. Everything
+above the article body is layout, not recirculation.
+
+### 2. A captioned `<figure>` is content, and must not be second-guessed
+
+Hindustan Times lost its lead photo to an enclosing `taboola-readmore`
+wrapper; Inside Climate News lost its featured image to `header.entry-header`.
+Both are real article photos inside a real `<figure>` with a real
+`<figcaption>`.
+
+Fix: an `<img>` in a `<figure>` carrying a `<figcaption>` of at least
+`MIN_CAPTION` chars is `trusted` — the class heuristic is skipped for it. Only
+the promo-*link* test still applies, because a photo hyperlinked to a
+*different article* is a thumbnail no matter how it is marked up. That test has
+no false positives; the class heuristic has many.
+
+### 3. The lead photo often sits outside the body container
+
+Grist's hero `<figure>` is above `.entry-content`, so any body-scoped scan
+misses the single most valuable image on the page.
+
+Fix: `Adapter.images()` now runs **two passes** — captioned `<figure>`s
+document-wide first, then body-scoped images — deduped by URL. And when
+`body_xpath` matches nothing at all (Times of India has neither `<article>` nor
+`<main>`), it falls back to `//body` rather than silently returning nothing.
+
+### 4. Captions are not always in `<figcaption>`
+
+PBS keeps its caption in `p.post__hero-caption`; RNZ prefixes captions with a
+literal `"Caption: "`. `caption_for()` now falls back to a nearby element whose
+class contains `caption`/`cutline`/`media-desc`, **excluding** anything
+matching `byline` — without that exclusion PBS's `div.post__byline-caption`
+wins and every caption becomes the reporter's name. Leading `Caption:` /
+`Photo:` labels are stripped, and boilerplate that occupies a caption slot
+(`RELATED:`, `Click to play video`, `Grist thanks its sponsors`) is rejected.
+
+**Regression check:** re-extracting stored articles from the original outlets
+with the patched code returns identical image counts (18 images across 13
+CBS/CNN/Fox/NBC/NPR articles, before and after). AP is unchanged by
+construction — it has no `<figure>` elements, so the trusted path never fires,
+and its promos already sat outside the `RichTextStoryBody` scope.
+
+## Why most new outlets are config, not code
+
+Nineteen more hand-written adapter classes would have been nineteen copies of
+the same loop. The six original classes stay as classes because each needs
+genuinely custom discovery (Fox's JSON search API, CNN's sitemap, CBS's
+per-tag merging). Everything added here fits one shape — *paginated listing
+URLs + an article-URL pattern* — so it is declared as data in `TAG_OUTLETS`
+and executed by a single `TagIndexAdapter`. Adding an outlet is now a dict.
+
+Two details in that adapter are load-bearing:
+
+- **Page 1 is fetched from its own URL**, never `/page/1/` — most sites 404 on
+  the explicit form.
+- **The empty-page counter keys on *new* links, not *found* links.** A site
+  whose pagination is JavaScript serves page 1 again for every `?page=N`;
+  keying on `found` would happily walk 200 identical pages. This is what caps
+  the single-page outlets at one fetch instead of sixty.
 
 ## Date window
 
