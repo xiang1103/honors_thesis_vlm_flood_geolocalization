@@ -53,3 +53,5 @@ python3 image_review_server.py          # http://127.0.0.1:8765  — human revie
 python3 image_vlm_review_server.py      # http://127.0.0.1:8766  — model results
 ```
 
+## Limitations 
+- Near identical images (ex: cropped) are not detected by hashing 
