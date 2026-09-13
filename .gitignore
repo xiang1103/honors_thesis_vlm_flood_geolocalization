@@ -17,3 +17,5 @@ venv/
 *.key
 # All crawl/verify intermediates and logs (jsonl, tmp, logs)
 scrape_data/
+
+data/image_hashes.json
