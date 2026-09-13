@@ -3,7 +3,7 @@
 
     python3 make_metadata.py
 
-Every count comes from `data/image_verification.json` alone, so the numbers
+Every count comes from `data/verified_images_news.json` alone, so the numbers
 describe the DATASET, not the crawl. That file already excludes dead URLs (a
 fetch failure is never written as a completed row) and exact duplicates
 (removed by dedupe.py), so nothing here subtracts them and no field reports a
@@ -25,7 +25,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 PROJECT = Path(__file__).resolve().parent
-DEFAULT_VERIFICATION = PROJECT / "data" / "image_verification.json"
+DEFAULT_VERIFICATION = PROJECT / "data" / "verified_images_news.json"
 DEFAULT_DEST = PROJECT / "data" / "meta_data.json"
 
 

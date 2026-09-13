@@ -4,7 +4,7 @@ Collect flood news articles with captioned images from 29 news outlets, then
 filter the images down to usable street-level photographs — by model and by eye.
 
 ```
-scrape ──► data/news_scrape_results.json ──► VLM verify ──► data/image_verification.json
+scrape ──► data/news_scrape_results.json ──► VLM verify ──► data/verified_images_news.json
                     (the corpus)                                          │
                           └──► review site :8765 (human)   :8766 (model) ◄┘
 ```
@@ -18,7 +18,7 @@ local_vlm/        local vlm model for running image checks
 ``` 
 
 ```
-image_verification.json: all scraped news with images and model-decisions on whether the image is relevant, duplicate and dead urls are removed.  
+verified_images_news.json: all scraped news with images and model-decisions on whether the image is relevant, duplicate and dead urls are removed.  
 news_scrape_results.json: all news and images collected so far   
 ```
 

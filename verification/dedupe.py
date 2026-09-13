@@ -41,7 +41,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from local_vlm.backend import FETCH_HEADERS, image_digests  # noqa: E402
 
 PROJECT = Path(__file__).resolve().parents[1]
-DEFAULT_RESULTS = PROJECT / "data" / "image_verification.json"
+DEFAULT_RESULTS = PROJECT / "data" / "verified_images_news.json"
 DEFAULT_CACHE = PROJECT / "data" / "image_hashes.json"
 
 

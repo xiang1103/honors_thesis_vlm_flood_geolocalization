@@ -80,7 +80,7 @@ scrape.py  --calls verify_text.score_record() INLINE, per article-->
     data/news_scrape_results.json         THE corpus: what --resume reads and
         |                                 what every downstream reader consumes
 verify_images_vlm.py -->
-    data/image_verification.json    one row per (article, image) with yes/no
+    data/verified_images_news.json    one row per (article, image) with yes/no
         |
 dedupe.py -->  same file, exact duplicates removed
 ```
@@ -120,7 +120,7 @@ failed, so it is 0 and `after < before` never fires. The read must be loud.
 `load_corpus_urls()` raises for the same reason: continuing would silently
 re-crawl everything.
 
-**`image_verification.json` is the resume ledger.** `pending = occurrences
+**`verified_images_news.json` is the resume ledger.** `pending = occurrences
 not in this file`. So deleting rows makes them pending again: a verifier run
 after `dedupe.py` *restores the duplicates it removed*. That is why dedup also
 happens at CLASSIFY time: `read_existing_results()` builds a `sha_cache`
@@ -202,7 +202,7 @@ blocks and takes the LAST match. Thinking off is also ~10x faster
 
 ```
 data/news_scrape_results.json      22M   the corpus
-data/image_verification.json  15M   image labels
+data/verified_images_news.json  15M   image labels
 data/image_hashes.json           2.0M   fingerprint cache for dedupe
 ```
 
