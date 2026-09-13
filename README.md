@@ -18,7 +18,7 @@ local_vlm/        local vlm model for running image checks
 ``` 
 
 ```
-image_vlm_verification_final.json: all scraped with images and model-decisions on whether the image is relevant 
+image_vlm_verification_final.json: all scraped news with images and model-decisions on whether the image is relevant 
 ```
 
 
