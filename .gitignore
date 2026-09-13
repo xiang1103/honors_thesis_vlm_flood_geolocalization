@@ -18,3 +18,5 @@ venv/
 # Crawl logs and in-progress crawl state
 data/logs/
 data/outlets/*.jsonl
+
+scrape_data/
