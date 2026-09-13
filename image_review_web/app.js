@@ -26,11 +26,7 @@ const state = {
 
 const ui = {
   summary: document.querySelector("#summary"),
-  search: document.querySelector("#search"),
   outlet: document.querySelector("#outlet"),
-  verification: document.querySelector("#verification"),
-  visualHint: document.querySelector("#visualHint"),
-  reviewFilter: document.querySelector("#reviewFilter"),
   exportReviews: document.querySelector("#exportReviews"),
   resultCount: document.querySelector("#resultCount"),
   pageStatus: document.querySelector("#pageStatus"),
@@ -221,26 +217,21 @@ function renderCard(item, index) {
 }
 
 function filteredItems() {
-  const query = ui.search.value.trim().toLocaleLowerCase();
-  return state.items.filter((item) => {
-    if (ui.outlet.value !== "all" && item.outlet !== ui.outlet.value) return false;
-    if (ui.verification.value === "verified" && !item.flood_verified) return false;
-    if (ui.verification.value === "unverified" && item.flood_verified) return false;
-    if (ui.visualHint.value === "candidate" && item.suspect_nonstreet) return false;
-    if (ui.visualHint.value === "suspect" && !item.suspect_nonstreet) return false;
-    if (ui.visualHint.value === "duplicate" && item.duplicate_count < 2) return false;
-    const review = state.reviews[item.id];
-    if (ui.reviewFilter.value === "unreviewed" && review) return false;
-    if (["useful", "reject", "unsure"].includes(ui.reviewFilter.value) && review !== ui.reviewFilter.value) return false;
-    if (query && !`${item.article_title} ${item.caption}`.toLocaleLowerCase().includes(query)) return false;
-    return true;
-  });
+  // Outlet is the only filter left. The server sends `yes` images only, so
+  // there is nothing here to narrow by verdict.
+  return state.items.filter(
+    (item) => ui.outlet.value === "all" || item.outlet === ui.outlet.value,
+  );
 }
 
 function renderSummary() {
   if (!state.summary) return;
   const reviewed = Object.keys(state.reviews).length;
-  ui.summary.textContent = `${state.summary.images.toLocaleString()} images · ${state.summary.articles.toLocaleString()} articles · ${reviewed.toLocaleString()} reviewed`;
+  const s = state.summary;
+  ui.summary.textContent =
+    `${s.images.toLocaleString()} verified images · `
+    + `${s.articles.toLocaleString()} articles · `
+    + `${reviewed.toLocaleString()} reviewed`;
 }
 
 function renderGrid() {
@@ -332,12 +323,10 @@ function exportReviews() {
   URL.revokeObjectURL(url);
 }
 
-for (const control of [ui.search, ui.outlet, ui.verification, ui.visualHint, ui.reviewFilter]) {
-  control.addEventListener(control === ui.search ? "input" : "change", () => {
-    state.page = 1;
-    renderGrid();
-  });
-}
+ui.outlet.addEventListener("change", () => {
+  state.page = 1;
+  renderGrid();
+});
 ui.previousPage.addEventListener("click", () => { state.page -= 1; renderGrid(); window.scrollTo({ top: 0, behavior: "smooth" }); });
 ui.nextPage.addEventListener("click", () => { state.page += 1; renderGrid(); window.scrollTo({ top: 0, behavior: "smooth" }); });
 ui.closeViewer.addEventListener("click", () => ui.viewer.close());
