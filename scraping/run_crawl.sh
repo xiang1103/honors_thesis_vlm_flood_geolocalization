@@ -10,7 +10,7 @@
 # Then:
 #   tmux attach -t flood-scrape     # watch it
 #   Ctrl-b then d                   # detach, leaving it running
-#   tail -f data/logs/flood-scrape_latest.log   # watch without attaching
+#   tail -f scrape_data/logs/flood-scrape_latest.log   # watch without attaching
 #
 # NOTE: this survives a dropped *connection*, not a suspended *machine*. If
 # this box is the laptop itself, closing the lid suspends the CPU and the
@@ -27,7 +27,7 @@ DELAY="${DELAY:-0.6}"
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PY="${PY:-/home/liu47/conda_envs/newEnv_local/bin/python3}"
-LOG_DIR="$HERE/../data/logs"
+LOG_DIR="$HERE/../scrape_data/logs"
 mkdir -p "$LOG_DIR"
 LOG="$LOG_DIR/${SESSION}_$(date +%Y%m%d_%H%M%S).log"
 

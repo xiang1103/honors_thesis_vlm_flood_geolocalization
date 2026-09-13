@@ -107,6 +107,7 @@ class LocalVLM:
         max_pixels: int = DEFAULT_MAX_PIXELS,
         fetch_timeout: int = 30,
         enable_thinking: bool = False,
+        sha_cache: dict[str, dict[str, str]] | None = None,
     ) -> None:
         self.model_path = str(model_path)
         self.device_map = device_map
@@ -118,6 +119,14 @@ class LocalVLM:
         # With it on, max_new_tokens must be raised a long way or the reply is
         # cut off mid-thought and never reaches an answer.
         self.enable_thinking = enable_thinking
+
+        # image_sha256 -> {answer, model_output}. Seeded from rows already on
+        # disk and extended as this run classifies, so the same picture behind
+        # a different URL costs one forward pass in total, not one per URL.
+        # The image must still be FETCHED -- its hash is unknowable until the
+        # bytes arrive -- but that is cheap next to the GPU.
+        self._sha_cache = {} if sha_cache is None else sha_cache
+        self._sha_lock = threading.Lock()
 
         self._model = None
         self._processor = None
@@ -220,7 +229,7 @@ class LocalVLM:
         for attempt in range(1, retries + 1):
             try:
                 image, digests = self.fetch_image(image_url)
-            except Exception as exc:
+            except Exception as exc:  # noqa: BLE001 -- see below
                 # A dead or blocked image URL is permanent for this image and
                 # unrelated to the model, so do not burn every retry on it.
                 return {
@@ -229,6 +238,21 @@ class LocalVLM:
                     "attempts": attempt,
                     "fatal": False,
                 }
+            # Same pixels already judged? Reuse the verdict instead of paying
+            # for it again. Checked after the fetch because the hash cannot be
+            # known before it, and before generation because that is the cost.
+            with self._sha_lock:
+                seen = self._sha_cache.get(digests["image_sha256"])
+            if seen:
+                return {
+                    "status": "completed",
+                    "answer": seen["answer"],
+                    "model_output": seen["model_output"],
+                    "attempts": 0,
+                    "reused_for_duplicate_image": True,
+                    **digests,
+                }
+
             try:
                 text = self._generate(image, prompt)
             except Exception as exc:
@@ -244,11 +268,17 @@ class LocalVLM:
 
             answer = parse_answer(text)
             if answer:
+                with self._sha_lock:
+                    self._sha_cache.setdefault(
+                        digests["image_sha256"],
+                        {"answer": answer, "model_output": text},
+                    )
                 return {
                     "status": "completed",
                     "answer": answer,
                     "model_output": text,
                     "attempts": attempt,
+                    "reused_for_duplicate_image": False,
                     **digests,
                 }
             if attempt < retries:

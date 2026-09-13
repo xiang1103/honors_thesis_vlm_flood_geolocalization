@@ -6,7 +6,7 @@ downloads or saves image files locally.
 Output follows the same two-stage shape as scrape.py: each classification is
 appended to a JSONL as soon as it lands (so a crash or a credit limit loses
 nothing mid-run), and at the end that JSONL is MERGED into the canonical
-image_vlm_verification_final.json and deleted. The canonical JSON is therefore
+data/image_verification.json and deleted. The canonical JSON is therefore
 the store of record, and the thing a re-run reads to know which images have
 already been paid for. Pass --keep-jsonl to retain the intermediate file.
 """
@@ -134,14 +134,14 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--output",
         type=Path,
-        default=project_root / "data" / "image_vlm_verification.jsonl",
+        default=project_root / "scrape_data" / "image_verification.jsonl",
         help="Intermediate append-only JSONL; merged into --final-output and "
              "deleted when the run finishes.",
     )
     parser.add_argument(
         "--final-output",
         type=Path,
-        default=project_root / "data" / "image_vlm_verification_final.json",
+        default=project_root / "data" / "image_verification.json",
         help="Canonical JSON with the latest valid result for each occurrence. "
              "This is the resumable store of record.",
     )
@@ -265,8 +265,20 @@ def is_completed(result: Any) -> bool:
 
 def read_existing_results(
     final_path: Path, history_path: Path, prompt: str, model: str
-) -> tuple[dict[str, dict[str, Any]], dict[str, dict[str, str]], int]:
-    """Completed classifications on disk: (by id, url_cache, off_prompt_count).
+) -> tuple[dict[str, dict[str, Any]], dict[str, dict[str, str]],
+           dict[str, dict[str, str]], int]:
+    """Completed classifications on disk.
+
+    Returns (by id, url_cache, sha_cache, off_prompt_count). Two caches, each
+    catching a different kind of repeat:
+
+      url_cache  same image_url -> never re-fetched, never re-classified.
+      sha_cache  same PIXELS behind a different url -> fetched (we cannot know
+                 the hash without the bytes) but never re-classified.
+
+    The sha cache is what stops the same wire photo, syndicated across outlets
+    under different URLs, from being sent to the GPU once per outlet and
+    entering the results file as several independent rows.
 
     EVERY completed result is reusable, whatever prompt or model produced it --
     an answer already paid for is never re-requested just because the criteria
@@ -281,6 +293,7 @@ def read_existing_results(
     """
     latest: dict[str, dict[str, Any]] = {}
     url_cache: dict[str, dict[str, str]] = {}
+    sha_cache: dict[str, dict[str, str]] = {}
     off_prompt: set[str] = set()
 
     def absorb(result: Any) -> None:
@@ -293,12 +306,18 @@ def read_existing_results(
                 off_prompt.add(str(occurrence_id))
             else:
                 off_prompt.discard(str(occurrence_id))
+        answer_pair = {
+            "answer": str(result["answer"]),
+            "model_output": str(result.get("model_output") or ""),
+        }
         image_url = result.get("image_url")
         if image_url:
-            url_cache[str(image_url)] = {
-                "answer": str(result["answer"]),
-                "model_output": str(result.get("model_output") or ""),
-            }
+            url_cache[str(image_url)] = answer_pair
+        # Rows classified before content hashing was added carry no sha; they
+        # simply do not contribute to this cache.
+        sha = result.get("image_sha256")
+        if sha:
+            sha_cache[str(sha)] = answer_pair
 
     if final_path.exists():
         try:
@@ -330,7 +349,7 @@ def read_existing_results(
                     continue
                 absorb(result)
 
-    return latest, url_cache, len(off_prompt)
+    return latest, url_cache, sha_cache, len(off_prompt)
 
 
 #: A status is only read out of free text when it is stated AS a status. The
@@ -588,8 +607,20 @@ def main() -> int:
             f"  python3 scraping/scrape.py --outlets all --resume"
         )
     occurrences = list(iter_image_occurrences(args.corpus))
-    completed, url_cache, off_prompt = read_existing_results(
-        args.final_output, args.output, PROMPT, args.model
+    # The model NAME must be known before reading existing results, or the
+    # off-prompt count compares stored rows against the hosted model id even on
+    # a local run and reports almost everything as stale.
+    if args.backend == "local":
+        sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+        from local_vlm import DEFAULT_MODEL_PATH
+        model_path = args.model_path or DEFAULT_MODEL_PATH
+        model_name = f"local:{Path(model_path).name}"
+    else:
+        model_path = None
+        model_name = args.model
+
+    completed, url_cache, sha_cache, off_prompt = read_existing_results(
+        args.final_output, args.output, PROMPT, model_name
     )
     # (resume is prompt-agnostic; `model` here only feeds the informational count)
     pending = [o for o in occurrences if o["occurrence_id"] not in completed]
@@ -607,6 +638,12 @@ def main() -> int:
         f"Already completed: {len(completed)} occurrences. "
         f"Pending: {len(pending)} occurrences."
     )
+    if sha_cache:
+        print(
+            f"Known image contents: {len(sha_cache)} "
+            f"(a pending image whose pixels match one of these is fetched but "
+            f"not re-classified)."
+        )
     if off_prompt:
         print(
             f"Note: {off_prompt} stored result(s) came from a different prompt or "
@@ -626,12 +663,13 @@ def main() -> int:
     # backend-agnostic and keeps working unchanged for either path.
     stop_event = threading.Event()
     if args.backend == "local":
-        sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-        from local_vlm import DEFAULT_MODEL_PATH, LocalVLM
+        from local_vlm import LocalVLM
 
-        vlm = LocalVLM(args.model_path or DEFAULT_MODEL_PATH,
-                       device_map=args.device_map)
-        model_name = vlm.name
+        # The sha cache is shared with the backend, which extends it as the
+        # run proceeds -- duplicates discovered mid-run are reused too.
+        vlm = LocalVLM(model_path, device_map=args.device_map,
+                       sha_cache=sha_cache)
+        assert vlm.name == model_name
         print(f"Loading {vlm.model_path} onto {args.device_map} ...", flush=True)
         load_started = time.monotonic()
         try:
@@ -650,7 +688,6 @@ def main() -> int:
         if not token:
             raise SystemExit("No Hugging Face token supplied.")
         print(f"Using HF token from {token_source}.")
-        model_name = args.model
 
         def classify(image_url: str) -> dict[str, Any]:
             return classify_url(image_url, token, args.model, args.retries,

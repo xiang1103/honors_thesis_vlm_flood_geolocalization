@@ -93,7 +93,7 @@ if __name__ == "__main__":
 
     if len(sys.argv) < 2:
         raise SystemExit(
-            "usage: verify_text.py <data/outlets/<outlet>_flood.json | records.jsonl>\n"
+            "usage: verify_text.py <data/news_scrape_results.json | records.jsonl>\n"
             "Re-scores every record and reports the lowest-scoring titles."
         )
     path = sys.argv[1]

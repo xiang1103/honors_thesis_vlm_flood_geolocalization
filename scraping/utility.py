@@ -24,7 +24,7 @@ def count_news(file_path):
 
 
 if __name__ == "__main__":
-    files =retrieve_json_files("/home/liu47/vlm_flood/data/outlets")
+    files =retrieve_json_files("/home/liu47/vlm_flood/scrape_data")
     total =0 
     for f in files: 
         total += count_news(f) 

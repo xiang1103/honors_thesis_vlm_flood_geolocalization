@@ -484,7 +484,9 @@ def main():
     ap.add_argument("--old-streak", type=int, default=40,
                     help="stop an outlet after this many consecutive out-of-window articles")
     ap.add_argument("--data-dir", default=os.path.join(os.path.dirname(
-        os.path.dirname(os.path.abspath(__file__))), "data", "outlets"))
+        os.path.dirname(os.path.abspath(__file__))), "scrape_data"),
+                    help="where per-outlet .jsonl intermediates are written "
+                         "(gitignored; merged into --corpus and deleted)")
     ap.add_argument("--delay", type=float, default=0.6, help="seconds between article fetches")
     ap.add_argument("--resume", action="store_true")
     ap.add_argument("--keep-jsonl", action="store_true",

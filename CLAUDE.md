@@ -39,8 +39,8 @@ local_vlm/        model mechanics      backend.py, download_model.py
 image_review_web/       + image_review_server.py       human review site  :8765
 image_vlm_review_web/   + image_vlm_review_server.py   model results site :8766
 data/news_scrape_results.json   THE corpus — source of truth, what everything reads
-data/outlets/     empty except for transient <outlet>_flood.jsonl DURING a crawl.
-                  Recreated by makedirs; gitignored, so absent in a fresh clone.
+scrape_data/      ALL intermediates: per-outlet .jsonl, the verifier's .jsonl,
+                  crawl logs. Gitignored; recreated by makedirs.
 ```
 
 `scraping/design.md` is the outlet bake-off record: which outlets were
@@ -75,18 +75,18 @@ Long crawls: `./scraping/run_crawl.sh` (tmux, survives disconnect).
 
 ```
 scrape.py  --calls verify_text.score_record() INLINE, per article-->
-    data/outlets/<outlet>_flood.jsonl     per-outlet, appended+flushed per article,
+    scrape_data/<outlet>_flood.jsonl      per-outlet, appended+flushed per article,
         |                                 merged and DELETED when the outlet finishes
     data/news_scrape_results.json         THE corpus: what --resume reads and
         |                                 what every downstream reader consumes
 verify_images_vlm.py -->
-    data/image_vlm_verification_final.json    one row per (article, image) with yes/no
+    data/image_verification.json    one row per (article, image) with yes/no
         |
 dedupe.py -->  same file, exact duplicates removed
 ```
 
-Supporting files: `data/image_digests.json` (fingerprint cache, makes dedupe
-re-runs instant), `data/logs/`, `/home/liu47/models/Qwen3.8-27B` (weights,
+Supporting files: `data/image_hashes.json` (fingerprint cache, makes dedupe
+re-runs instant), `/home/liu47/models/Qwen3.8-27B` (weights,
 outside the repo).
 
 ## Invariants — do not break these
@@ -120,11 +120,18 @@ failed, so it is 0 and `after < before` never fires. The read must be loud.
 `load_corpus_urls()` raises for the same reason: continuing would silently
 re-crawl everything.
 
-**`final.json` is the resume ledger.** `pending = occurrences not in this
-file`. So deleting rows makes them pending again: a verifier run after
-`dedupe.py` *restores the duplicates it removed*. Deduplication is only stable
-if done at classify time (fetch -> hash -> seen? -> reuse answer, skip model).
-Not yet implemented.
+**`image_verification.json` is the resume ledger.** `pending = occurrences
+not in this file`. So deleting rows makes them pending again: a verifier run
+after `dedupe.py` *restores the duplicates it removed*. That is why dedup also
+happens at CLASSIFY time: `read_existing_results()` builds a `sha_cache`
+(image_sha256 -> verdict) from existing rows, `LocalVLM` checks it after
+fetching and before generating, and extends it as the run proceeds. A duplicate
+is still fetched -- the hash is unknowable without the bytes -- but never
+re-classified, and its row is marked `reused_for_duplicate_image`. Local
+backend only: the hosted API never hands us the pixels.
+
+Two caches, two repeats: `url_cache` catches the same URL (no fetch at all),
+`sha_cache` catches the same PIXELS behind a different URL.
 
 **Resume is prompt-agnostic, by the owner's explicit decision.** Editing
 `PROMPT` or `--model` does NOT re-classify existing rows. The file therefore
@@ -142,7 +149,7 @@ The crawl's JSONL is not made redundant by `load_corpus_urls()`. The corpus
 only learns an outlet's articles at `finalize()`, i.e. after the whole outlet
 completes -- floodlist is 4,227 articles at `--delay 0.6`, roughly 45 minutes.
 The JSONL is the only thing holding work inside that window. A `.jsonl` found
-in `data/outlets/` is therefore **unmerged work, not garbage**: re-run that
+in `scrape_data/` is therefore **unmerged work, not garbage**: re-run that
 outlet with `--resume` and it is folded in and cleaned up automatically. Never
 delete one to "tidy up".
 
@@ -195,13 +202,13 @@ blocks and takes the LAST match. Thinking off is also ~10x faster
 
 ```
 data/news_scrape_results.json      22M   the corpus
-data/image_vlm_verification_final.json  15M   image labels
-data/image_digests.json           2.0M   fingerprint cache for dedupe
+data/image_verification.json  15M   image labels
+data/image_hashes.json           2.0M   fingerprint cache for dedupe
 ```
 
 - Corpus: 5,892 articles, 8,679 images, 29 outlets. ~1,870 articles have no
   images and so appear in no verification output.
-- The 29 per-outlet `data/outlets/*_flood.json` were deleted once the corpus
+- The 29 per-outlet `*_flood.json` were deleted once the corpus
   was verified a field-for-field superset; they remain in git history.
 - Classified: ~8,638 rows, ~66% `yes` under the street-level prompt.
 - 1,624 rows (`cbs` 1,456, `fox` 110, `npr` 27, `ap` 23, `nbc` 6, `cnn` 2)

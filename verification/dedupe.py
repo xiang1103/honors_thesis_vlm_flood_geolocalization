@@ -41,8 +41,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from local_vlm.backend import FETCH_HEADERS, image_digests  # noqa: E402
 
 PROJECT = Path(__file__).resolve().parents[1]
-DEFAULT_RESULTS = PROJECT / "data" / "image_vlm_verification_final.json"
-DEFAULT_CACHE = PROJECT / "data" / "image_digests.json"
+DEFAULT_RESULTS = PROJECT / "data" / "image_verification.json"
+DEFAULT_CACHE = PROJECT / "data" / "image_hashes.json"
 
 
 def fetch_digests(urls: list[str], workers: int, timeout: int,

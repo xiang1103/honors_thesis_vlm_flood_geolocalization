@@ -18,7 +18,7 @@ from urllib.parse import urlparse
 
 
 PROJECT_DIR = Path(__file__).resolve().parent
-DEFAULT_RESULTS_FILE = PROJECT_DIR / "data" / "image_vlm_verification_final.json"
+DEFAULT_RESULTS_FILE = PROJECT_DIR / "data" / "image_verification.json"
 STATIC_DIR = PROJECT_DIR / "image_vlm_review_web"
 
 
