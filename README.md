@@ -33,7 +33,9 @@ load all collected news (news_scrape_results.json) ──► write new scrpapes 
 python3 scraping/scrape.py --outlets all --resume
 python3 scraping/scrape.py --outlets guardian,cna --resume   # some outlets
 python3 scraping/scrape.py --list-outlets                    # 29 outlets + expected volume
-```
+``` 
+
+```make_metadata.py``` regenerates meta_data.json file, but the file counts are dynamically updated during scraping and verification
 
 
 ## 2. VLM image verification

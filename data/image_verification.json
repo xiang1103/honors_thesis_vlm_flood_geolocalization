@@ -12,7 +12,7 @@
     "no": 2773,
     "deduplicated_by": "image_sha256",
     "near_duplicate_distance": null,
-    "dropped_duplicates": 622
+    "dropped_duplicates": 0
   },
   "current_prompt": "Is this a street-level photograph? Answer yes if the image shows anything a street view would contain: roads, streets, cars or other vehicles, people, buildings, houses, storefronts, signs, or similar ground-level surroundings. Water does not need to be present, and flooding is not required. Answer no only if the image is not a ground-level photograph of a real place, such as a map, radar or weather graphic, satellite or aerial view, chart, diagram, logo, screenshot, or a portrait or headshot with no surroundings visible. Answer yes or no.",
   "prompt": "Is this a street-level photograph? Answer yes if the image shows anything a street view would contain: roads, streets, cars or other vehicles, people, buildings, houses, storefronts, signs, or similar ground-level surroundings. Water does not need to be present, and flooding is not required. Answer no only if the image is not a ground-level photograph of a real place, such as a map, radar or weather graphic, satellite or aerial view, chart, diagram, logo, screenshot, or a portrait or headshot with no surroundings visible. Answer yes or no.",

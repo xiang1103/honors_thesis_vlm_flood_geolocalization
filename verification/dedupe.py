@@ -256,6 +256,11 @@ def main() -> int:
     tmp.write_text(json.dumps(payload, ensure_ascii=False, indent=2) + "\n",
                    encoding="utf-8")
     os.replace(tmp, args.results)
+    # Only the canonical artifact drives the canonical metadata. Running this
+    # against a copy via --results must not rewrite data/meta_data.json from it.
+    if args.results.resolve() == DEFAULT_RESULTS.resolve():
+        from make_metadata import refresh_quietly
+        refresh_quietly(args.results)
     print(f"written: {args.results}")
     print(f"summary: {payload['summary']}")
     return 0

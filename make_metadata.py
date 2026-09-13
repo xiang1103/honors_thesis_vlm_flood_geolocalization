@@ -75,6 +75,49 @@ def build(verification_path: Path) -> dict:
     }
 
 
+def refresh(verification_path: Path = DEFAULT_VERIFICATION,
+            dest: Path = DEFAULT_DEST, quiet: bool = False) -> dict | None:
+    """Regenerate the snapshot. Returns the metadata, or None if there is
+    nothing to describe yet.
+
+    Called at the end of a crawl, a verification run and a dedupe, so the file
+    can never quietly describe an older state of the dataset. A missing
+    verification file is NOT an error -- on a fresh checkout the first crawl
+    finishes before anything has been classified.
+    """
+    verification_path, dest = Path(verification_path), Path(dest)
+    if not verification_path.is_file():
+        return None
+
+    meta = build(verification_path)
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    tmp = dest.with_name(dest.name + ".tmp")
+    tmp.write_text(json.dumps(meta, ensure_ascii=False, indent=2) + "\n",
+                   encoding="utf-8")
+    os.replace(tmp, dest)
+
+    if not quiet:
+        t = meta["totals"]
+        print(f"metadata: {dest}")
+        print(f"  articles {t['articles']} | images {t['images']} "
+              f"| yes {t['yes']} no {t['no']} | outlets {t['outlets']}")
+    return meta
+
+
+def refresh_quietly(verification_path: Path = DEFAULT_VERIFICATION,
+                    dest: Path = DEFAULT_DEST) -> None:
+    """refresh() that can never take down its caller.
+
+    The metadata is a derived convenience; a crawl that spent an hour
+    collecting articles must not fail at the last step because a summary file
+    could not be written.
+    """
+    try:
+        refresh(verification_path, dest)
+    except Exception as exc:                      # noqa: BLE001
+        print(f"warning: could not update metadata ({type(exc).__name__}: {exc})")
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
@@ -84,17 +127,7 @@ def main() -> int:
 
     if not args.verification.is_file():
         raise SystemExit(f"missing: {args.verification}")
-
-    meta = build(args.verification)
-    tmp = args.dest.with_name(args.dest.name + ".tmp")
-    tmp.write_text(json.dumps(meta, ensure_ascii=False, indent=2) + "\n",
-                   encoding="utf-8")
-    os.replace(tmp, args.dest)
-
-    t = meta["totals"]
-    print(f"wrote {args.dest}")
-    print(f"  articles {t['articles']} | images {t['images']} "
-          f"| yes {t['yes']} no {t['no']} | outlets {t['outlets']}")
+    refresh(args.verification, args.dest)
     return 0
 
 

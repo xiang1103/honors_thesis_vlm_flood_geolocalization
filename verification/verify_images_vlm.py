@@ -655,6 +655,11 @@ def main() -> int:
             args.output, args.final_output, occurrences, completed
         )
         discard_history(args.output, args.keep_jsonl)
+        sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+        from make_metadata import DEFAULT_VERIFICATION, refresh_quietly
+        # Canonical metadata only ever comes from the canonical file.
+        if args.final_output.resolve() == DEFAULT_VERIFICATION.resolve():
+            refresh_quietly(args.final_output)
         print(f"Nothing to classify. Canonical results: {args.final_output}")
         print(f"Summary: {summary}")
         return 0
@@ -793,6 +798,11 @@ def main() -> int:
         args.output, args.final_output, occurrences, completed
     )
     discard_history(args.output, args.keep_jsonl)
+    sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+    from make_metadata import DEFAULT_VERIFICATION, refresh_quietly
+    # Canonical metadata only ever comes from the canonical file.
+    if args.final_output.resolve() == DEFAULT_VERIFICATION.resolve():
+        refresh_quietly(args.final_output)
     print(f"Canonical results: {args.final_output}")
     if args.keep_jsonl:
         print(f"History kept: {args.output}")

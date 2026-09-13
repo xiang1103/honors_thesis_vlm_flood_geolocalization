@@ -47,6 +47,9 @@ sys.path.insert(0, os.path.join(os.path.dirname(_HERE), "verification"))
 from adapters import ADAPTERS, IMAGE_OUTLETS, get_adapter   # noqa: E402
 from verify_text import score_record       # noqa: E402
 
+sys.path.insert(0, os.path.dirname(_HERE))
+from make_metadata import refresh_quietly    # noqa: E402
+
 #: The one file every outlet's crawl merges into. Per-outlet JSONs are gone:
 #: the JSONL is still per-outlet (crash safety during a run) but it is merged
 #: straight into this corpus, which is also what --resume reads.
@@ -545,6 +548,11 @@ def main():
           f"{sum(s['verified'] for s in summaries):>9d}")
 
     print(f"\ncorpus: {args.corpus}")
+    # A crawl changes the corpus, not the verification file, so the counts here
+    # rarely move -- but refreshing keeps the snapshot's timestamp honest and
+    # means the file exists after a first-ever crawl.
+    print()
+    refresh_quietly()
 
 
 if __name__ == "__main__":
