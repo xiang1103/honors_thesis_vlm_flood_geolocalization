@@ -1,241 +1,170 @@
 {
-  "generated_at": "2026-09-13T01:04:03+00:00",
+  "generated_at": "2026-09-13T01:12:10+00:00",
   "prompt": "Is this a street-level photograph? Answer yes if the image shows anything a street view would contain: roads, streets, cars or other vehicles, people, buildings, houses, storefronts, signs, or similar ground-level surroundings. Water does not need to be present, and flooding is not required. Answer no only if the image is not a ground-level photograph of a real place, such as a map, radar or weather graphic, satellite or aerial view, chart, diagram, logo, screenshot, or a portrait or headshot with no surroundings visible. Answer yes or no.",
   "totals": {
-    "articles": 5893,
-    "articles_with_images": 4020,
-    "articles_without_images": 1873,
-    "images": 8680,
-    "images_in_dataset": 8044,
+    "articles": 3751,
+    "images": 8044,
     "yes": 5271,
     "no": 2773,
-    "outlets": 28,
+    "outlets": 26,
     "yes_rate": 0.6553
   },
   "by_outlet": {
     "abcau": {
       "articles": 25,
-      "articles_with_images": 25,
-      "images": 114,
-      "images_in_dataset": 110,
+      "images": 110,
       "yes": 80,
       "no": 30
     },
     "aljazeera": {
       "articles": 8,
-      "articles_with_images": 8,
       "images": 23,
-      "images_in_dataset": 23,
       "yes": 22,
       "no": 1
     },
     "ap": {
-      "articles": 34,
-      "articles_with_images": 7,
-      "images": 23,
-      "images_in_dataset": 22,
+      "articles": 7,
+      "images": 22,
       "yes": 16,
       "no": 6
     },
     "cbs": {
-      "articles": 851,
-      "articles_with_images": 599,
-      "images": 1458,
-      "images_in_dataset": 1388,
+      "articles": 587,
+      "images": 1388,
       "yes": 847,
       "no": 541
     },
     "cna": {
-      "articles": 25,
-      "articles_with_images": 24,
-      "images": 56,
-      "images_in_dataset": 54,
+      "articles": 23,
+      "images": 54,
       "yes": 46,
       "no": 8
     },
     "cnn": {
-      "articles": 2,
-      "articles_with_images": 1,
+      "articles": 1,
       "images": 2,
-      "images_in_dataset": 2,
       "yes": 1,
       "no": 1
     },
     "ctv": {
-      "articles": 9,
-      "articles_with_images": 7,
-      "images": 7,
-      "images_in_dataset": 6,
+      "articles": 6,
+      "images": 6,
       "yes": 5,
       "no": 1
     },
     "floodlist": {
-      "articles": 3477,
-      "articles_with_images": 2303,
-      "images": 4227,
-      "images_in_dataset": 3859,
+      "articles": 2082,
+      "images": 3859,
       "yes": 2401,
       "no": 1458
     },
     "fox": {
-      "articles": 47,
-      "articles_with_images": 47,
-      "images": 111,
-      "images_in_dataset": 101,
+      "articles": 46,
+      "images": 101,
       "yes": 65,
       "no": 36
     },
     "globalnews": {
-      "articles": 16,
-      "articles_with_images": 12,
-      "images": 39,
-      "images_in_dataset": 28,
+      "articles": 12,
+      "images": 28,
       "yes": 24,
       "no": 4
     },
     "grist": {
-      "articles": 28,
-      "articles_with_images": 26,
+      "articles": 26,
       "images": 98,
-      "images_in_dataset": 98,
       "yes": 71,
       "no": 27
     },
     "guardian": {
-      "articles": 253,
-      "articles_with_images": 253,
-      "images": 795,
-      "images_in_dataset": 771,
+      "articles": 251,
+      "images": 771,
       "yes": 578,
       "no": 193
     },
     "hindustantimes": {
-      "articles": 96,
-      "articles_with_images": 89,
-      "images": 150,
-      "images_in_dataset": 149,
+      "articles": 88,
+      "images": 149,
       "yes": 113,
       "no": 36
     },
     "independent": {
-      "articles": 71,
-      "articles_with_images": 54,
-      "images": 137,
-      "images_in_dataset": 136,
+      "articles": 54,
+      "images": 136,
       "yes": 80,
       "no": 56
     },
     "insideclimate": {
       "articles": 6,
-      "articles_with_images": 6,
       "images": 16,
-      "images_in_dataset": 16,
       "yes": 10,
       "no": 6
     },
     "jakartapost": {
-      "articles": 62,
-      "articles_with_images": 62,
-      "images": 79,
-      "images_in_dataset": 65,
+      "articles": 60,
+      "images": 65,
       "yes": 54,
       "no": 11
     },
     "latimes": {
       "articles": 6,
-      "articles_with_images": 6,
       "images": 9,
-      "images_in_dataset": 9,
       "yes": 6,
       "no": 3
     },
     "nbc": {
-      "articles": 19,
-      "articles_with_images": 18,
-      "images": 29,
-      "images_in_dataset": 27,
+      "articles": 18,
+      "images": 27,
       "yes": 15,
       "no": 12
     },
     "newsweek": {
       "articles": 10,
-      "articles_with_images": 10,
       "images": 16,
-      "images_in_dataset": 16,
       "yes": 3,
       "no": 13
     },
     "npr": {
       "articles": 14,
-      "articles_with_images": 14,
       "images": 27,
-      "images_in_dataset": 27,
       "yes": 19,
       "no": 8
     },
     "nytimes": {
-      "articles": 21,
-      "articles_with_images": 17,
+      "articles": 17,
       "images": 17,
-      "images_in_dataset": 17,
       "yes": 13,
       "no": 4
     },
     "pbs": {
-      "articles": 31,
-      "articles_with_images": 29,
+      "articles": 29,
       "images": 33,
-      "images_in_dataset": 33,
       "yes": 26,
       "no": 7
     },
     "premiumtimes": {
-      "articles": 389,
-      "articles_with_images": 32,
+      "articles": 32,
       "images": 154,
-      "images_in_dataset": 154,
       "yes": 73,
       "no": 81
     },
     "rnz": {
-      "articles": 345,
-      "articles_with_images": 338,
-      "images": 1020,
-      "images_in_dataset": 898,
+      "articles": 315,
+      "images": 898,
       "yes": 680,
       "no": 218
     },
     "straitstimes": {
-      "articles": 4,
-      "articles_with_images": 3,
+      "articles": 3,
       "images": 3,
-      "images_in_dataset": 3,
       "yes": 3,
       "no": 0
     },
     "toi": {
-      "articles": 30,
-      "articles_with_images": 29,
-      "images": 36,
-      "images_in_dataset": 32,
+      "articles": 25,
+      "images": 32,
       "yes": 20,
       "no": 12
-    },
-    "usatoday": {
-      "articles": 11,
-      "articles_with_images": 1,
-      "images": 1,
-      "images_in_dataset": 0,
-      "yes": 0,
-      "no": 0
-    },
-    "washingtonpost": {
-      "articles": 3,
-      "articles_with_images": 0,
-      "images": 0,
-      "images_in_dataset": 0,
-      "yes": 0,
-      "no": 0
     }
   }
 }
