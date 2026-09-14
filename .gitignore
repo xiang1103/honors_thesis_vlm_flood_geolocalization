@@ -20,3 +20,4 @@ scrape_data/
 
 data/image_hashes.json
 data/news_scrape_results.json
+data/verified_images_news.json
