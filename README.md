@@ -20,6 +20,7 @@ local_vlm/        local vlm model for running image checks
 ```
 verified_images_news.json: all scraped news with images and model-decisions on whether the image is relevant, duplicate and dead urls are removed.  
 news_scrape_results.json: all news and images collected so far   
+meta_data.json: track meta data information of verified news/images 
 ```
 
 

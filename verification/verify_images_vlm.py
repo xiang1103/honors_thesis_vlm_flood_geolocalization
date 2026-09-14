@@ -239,8 +239,22 @@ def iter_image_occurrences(corpus: Path) -> Iterable[dict[str, Any]]:
     ORDER here differs from the old per-outlet walk, which changes
     `article_index` -- but not `occurrence_id`, which is derived from URLs
     alone, so resume is unaffected by the switch.
+
+    Articles that failed the text check (`flood_verified` false) are skipped
+    entirely. Their images are never enumerated, so they are never pending and
+    never enter the results file -- unlike deleting rows after the fact, which
+    the resume ledger would simply undo. The article stays in the corpus so the
+    crawl does not re-fetch it and the text is not lost; only the GPU work is
+    avoided (~31% of images at the time this was added).
+
+    This is the one place flood relevance is enforced. The image prompt judges
+    street-view geometry only and has no opinion about water, so without this
+    the dataset would contain street views from any article an outlet happened
+    to file under a flood tag -- politics, chemical regulation, and so on.
     """
     for article_index, article in enumerate(read_articles(corpus)):
+        if not article.get("flood_verified"):
+            continue
         article_url = str(article.get("url") or "")
         for image_index, image in enumerate(article.get("images") or []):
             image_url = str(image.get("url") or "").strip()
