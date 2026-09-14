@@ -229,6 +229,28 @@ def scrape_article(session, url, adapter):
     return score_record(rec)
 
 
+def drop_seen_images(rec, seen_images):
+    """Remove images whose URL is already in the corpus, then record the rest.
+
+    Applied to EVERY article, so a photo reused across outlets survives only on
+    the first article that carried it. The article itself is always kept, even
+    when this empties its image list: dropping it would take its URL out of the
+    seen-set, so the next crawl would re-fetch it, re-drop its images and omit
+    it again -- forever. Kept with no images, it is simply absent from the
+    dataset, because verification enumerates per image.
+    """
+    kept = []
+    for image in rec.get("images") or []:
+        url = str(image.get("url") or "").strip()
+        if not url or url in seen_images:
+            continue
+        seen_images.add(url)
+        kept.append(image)
+    dropped = len(rec.get("images") or []) - len(kept)
+    rec["images"] = kept
+    return dropped
+
+
 DATE_RE = re.compile(r"(\d{4})-(\d{2})-(\d{2})")
 
 
@@ -324,29 +346,33 @@ def finalize(jsonl_path, corpus_path, keep_jsonl=False):
     return recs
 
 
-def load_corpus_urls(corpus_path):
-    """Every article URL already in the corpus: the seen-set for the crawl.
+def load_corpus_sets(corpus_path):
+    """(article URLs, image URLs) already in the corpus -- the crawl's seen-sets.
 
-    Loaded ONCE per crawl and shared by every outlet. Loading it inside
-    crawl_outlet() instead would re-parse the whole corpus 29 times a run
-    (~8.7s vs ~0.3s measured); the set itself is O(1) to probe at any size.
-
-    Staleness across outlets is not a correctness problem: article URLs are
-    per-publisher, so outlet B never needs URLs outlet A added this run, and
-    each outlet additionally unions in its own JSONL.
+    One parse yields both. The IMAGE set is global, not per-article: the same
+    photo syndicated to five outlets appears under one URL and is kept once,
+    for the first article that carried it. 95% of duplicate images in this
+    corpus are exact-URL repeats, so this catches almost all of them without
+    downloading a byte -- content hashing needs the pixels and stays in the
+    verification stage, where they are fetched anyway.
     """
     if not os.path.exists(corpus_path):
-        return set()
+        return set(), set()
     try:
         with open(corpus_path) as f:
-            return {r["url"] for r in json.load(f) if r.get("url")}
+            records = json.load(f)
     except (json.JSONDecodeError, OSError) as exc:
-        # Same reasoning as finalize(): the file exists, so a read failure is
-        # an anomaly. Continuing would silently re-crawl everything.
         raise RuntimeError(
             f"{corpus_path} exists but could not be read ({exc}). Refusing to "
             f"continue: the crawl would re-fetch every article already collected."
         ) from exc
+    article_urls = {r["url"] for r in records if r.get("url")}
+    image_urls = {
+        str(i.get("url") or "").strip()
+        for r in records for i in (r.get("images") or [])
+        if str(i.get("url") or "").strip()
+    }
+    return article_urls, image_urls
 
 
 def load_seen(path):
@@ -383,7 +409,7 @@ def download_images(rec, image_dir, session):
         im["local_path"] = dest
 
 
-def crawl_outlet(name, args, corpus_urls=frozenset()):
+def crawl_outlet(name, args, corpus_urls=frozenset(), seen_images=None):
     """Crawl one outlet into the corpus. Returns summary dict.
 
     The per-outlet JSONL is still this run's first stop -- appended and flushed
@@ -401,6 +427,10 @@ def crawl_outlet(name, args, corpus_urls=frozenset()):
     seen = load_seen(jsonl_path) | corpus_urls
     if seen:
         log(f"{name}: {len(seen)} URLs already collected, skipping those")
+    # Shared across outlets and mutated as the crawl runs, so a photo first
+    # seen in outlet A is already known by the time outlet B reaches it.
+    if seen_images is None:
+        seen_images = set()
 
     session = requests.Session()
     fetch_one = lambda u: fetch(session, u)          # noqa: E731
@@ -417,7 +447,7 @@ def crawl_outlet(name, args, corpus_urls=frozenset()):
     if args.since_days:
         cutoff = datetime.now() - timedelta(days=args.since_days)
 
-    kept = skipped = too_old = failed = 0
+    kept = skipped = too_old = failed = dropped_images = 0
     consecutive_old = 0
     with open(jsonl_path, "a") as fh:
         for i, u in enumerate(urls, 1):
@@ -442,6 +472,8 @@ def crawl_outlet(name, args, corpus_urls=frozenset()):
                     continue
                 consecutive_old = 0
 
+            dropped_images += drop_seen_images(rec, seen_images)
+
             if len(rec["images"]) < args.min_images:
                 skipped += 1
                 time.sleep(args.delay)
@@ -465,10 +497,11 @@ def crawl_outlet(name, args, corpus_urls=frozenset()):
     nvid = sum(len(r.get("videos") or []) for r in recs)
     nver = sum(1 for r in recs if r.get("flood_verified"))
     log(f"{name}: {len(recs)} records ({len(corpus)} in corpus) -> {corpus_path}  "
-        f"(images={nimg} videos={nvid} verified={nver} old_skipped={too_old} failed={failed})")
+        f"(images={nimg} videos={nvid} verified={nver} old_skipped={too_old} "
+        f"dup_images={dropped_images} failed={failed})")
     return {"outlet": name, "records": len(recs), "images": nimg, "videos": nvid,
             "verified": nver, "too_old": too_old, "failed": failed,
-            "path": corpus_path}
+            "dup_images": dropped_images, "path": corpus_path}
 
 
 def main():
@@ -519,15 +552,16 @@ def main():
     if args.image_dir is None:
         args.image_dir = os.path.join(args.data_dir, "images")
 
-    # One parse of the corpus for the whole crawl; see load_corpus_urls().
-    corpus_urls = load_corpus_urls(str(args.corpus))
+    # One parse of the corpus for the whole crawl; see load_corpus_sets().
+    corpus_urls, seen_images = load_corpus_sets(str(args.corpus))
     if corpus_urls:
-        log(f"resume: {len(corpus_urls)} URLs already in {args.corpus}")
+        log(f"{len(corpus_urls)} articles and {len(seen_images)} image URLs "
+            f"already in {args.corpus}")
 
     summaries = []
     for n in names:
         try:
-            summaries.append(crawl_outlet(n, args, corpus_urls))
+            summaries.append(crawl_outlet(n, args, corpus_urls, seen_images))
         except KeyboardInterrupt:
             log("interrupted by user -- finalizing what we have")
             break
