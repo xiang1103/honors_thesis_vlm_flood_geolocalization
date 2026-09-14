@@ -31,8 +31,8 @@ load all collected news (news_scrape_results.json) ──► write new scrpapes 
 ```
 
 ```bash
-python3 scraping/scrape.py --outlets all --resume
-python3 scraping/scrape.py --outlets guardian,cna --resume   # some outlets
+python3 scraping/scrape.py --outlets all
+python3 scraping/scrape.py --outlets guardian,cna            # some outlets
 python3 scraping/scrape.py --list-outlets                    # 29 outlets + expected volume
 ``` 
 

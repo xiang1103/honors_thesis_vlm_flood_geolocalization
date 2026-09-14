@@ -46,15 +46,15 @@ fi
 LATEST="$LOG_DIR/${SESSION}_latest.log"
 ln -sfn "$LOG" "$LATEST"
 
-# --resume makes the run restartable: URLs already in the outlet's JSON/JSONL
-# are skipped, so re-running after a kill picks up where it left off.
+# The crawl always skips URLs already in the corpus (and in an un-merged
+# JSONL), so re-running after a kill picks up where it left off.
 CMD="cd '$HERE' && '$PY' scrape.py \
     --outlets '$OUTLETS' \
     --max-pages $MAX_PAGES \
     --limit $LIMIT \
     --since-days $SINCE_DAYS \
     --delay $DELAY \
-    --resume 2>&1 | tee '$LOG'"
+    2>&1 | tee '$LOG'"
 
 # `exec bash` keeps the pane alive after the crawl exits so the final summary
 # table is still there when you attach later.

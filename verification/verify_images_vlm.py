@@ -626,7 +626,7 @@ def main() -> int:
     if not args.corpus.is_file():
         raise SystemExit(
             f"No corpus at {args.corpus}. It is written by the crawl:\n"
-            f"  python3 scraping/scrape.py --outlets all --resume"
+            f"  python3 scraping/scrape.py --outlets all"
         )
     occurrences = list(iter_image_occurrences(args.corpus))
     # The model NAME must be known before reading existing results, or the

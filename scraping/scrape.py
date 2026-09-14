@@ -12,13 +12,14 @@ Usage
   PY=/home/liu47/conda_envs/newEnv_local/bin/python3
 
   # smoke test (2 listing pages)
-  $PY scrape.py --outlet cbs --max-pages 2 --out data/cbs_flood.jsonl
+  $PY scrape.py --outlets cbs --max-pages 2
 
-  # full crawl, resumable -- safe to Ctrl-C and re-run
-  $PY scrape.py --outlet cbs --max-pages 120 --resume --out data/cbs_flood.jsonl
+  # full crawl -- safe to Ctrl-C and re-run; URLs already in the corpus are
+  # never re-fetched, so every run picks up where the last one stopped
+  $PY scrape.py --outlets all
 
-  # add other outlets into the same file
-  $PY scrape.py --outlet ap  --resume --out data/cbs_flood.jsonl
+  # one or more named outlets
+  $PY scrape.py --outlets cbs,ap
 
 Record schema (one JSON object per line):
   {url, outlet, title, date, text, images:[{url,caption,source}],
@@ -52,7 +53,7 @@ from make_metadata import refresh_quietly    # noqa: E402
 
 #: The one file every outlet's crawl merges into. Per-outlet JSONs are gone:
 #: the JSONL is still per-outlet (crash safety during a run) but it is merged
-#: straight into this corpus, which is also what --resume reads.
+#: straight into this corpus, which is also what supplies the seen-URL set.
 DEFAULT_CORPUS = Path(__file__).resolve().parents[1] / "data" / "news_scrape_results.json"
 
 #: Canonical key order for every emitted record. Human-facing fields first
@@ -254,7 +255,7 @@ def parse_date(s):
 def finalize(jsonl_path, corpus_path, keep_jsonl=False):
     """Merge this run's JSONL into the corpus, then drop the JSONL.
 
-    MUST merge, not overwrite. With --resume the JSONL holds only the articles
+    MUST merge, not overwrite. The JSONL holds only the articles
     fetched *this* run, so rebuilding the corpus from it alone silently
     destroys everything collected previously. Existing records are loaded
     first and keyed by url; new ones update or extend them.
@@ -324,7 +325,7 @@ def finalize(jsonl_path, corpus_path, keep_jsonl=False):
 
 
 def load_corpus_urls(corpus_path):
-    """Every article URL already in the corpus, for --resume.
+    """Every article URL already in the corpus: the seen-set for the crawl.
 
     Loaded ONCE per crawl and shared by every outlet. Loading it inside
     crawl_outlet() instead would re-parse the whole corpus 29 times a run
@@ -344,7 +345,7 @@ def load_corpus_urls(corpus_path):
         # an anomaly. Continuing would silently re-crawl everything.
         raise RuntimeError(
             f"{corpus_path} exists but could not be read ({exc}). Refusing to "
-            f"continue: --resume would re-fetch every article already collected."
+            f"continue: the crawl would re-fetch every article already collected."
         ) from exc
 
 
@@ -393,14 +394,13 @@ def crawl_outlet(name, args, corpus_urls=frozenset()):
     corpus_path = str(args.corpus)
     jsonl_path = os.path.join(args.data_dir, f"{name}_flood.jsonl")
 
-    # resume: the corpus (loaded once, passed in) plus this outlet's own JSONL
-    # if a previous run was interrupted before it could be merged.
-    seen = set()
-    if args.resume:
-        seen |= load_seen(jsonl_path)
-        seen |= corpus_urls
-        if seen:
-            log(f"resume: {len(seen)} URLs already collected for {name}")
+    # Always skip what we already have: the corpus (loaded once, passed in)
+    # plus this outlet's own JSONL if a previous run was interrupted before it
+    # could be merged. There is no reason to re-fetch a URL already collected,
+    # so this is unconditional rather than a flag.
+    seen = load_seen(jsonl_path) | corpus_urls
+    if seen:
+        log(f"{name}: {len(seen)} URLs already collected, skipping those")
 
     session = requests.Session()
     fetch_one = lambda u: fetch(session, u)          # noqa: E731
@@ -491,7 +491,6 @@ def main():
                     help="where per-outlet .jsonl intermediates are written "
                          "(gitignored; merged into --corpus and deleted)")
     ap.add_argument("--delay", type=float, default=0.6, help="seconds between article fetches")
-    ap.add_argument("--resume", action="store_true")
     ap.add_argument("--keep-jsonl", action="store_true",
                     help="keep the intermediate JSONL instead of deleting it")
     ap.add_argument("--download-images", action="store_true")

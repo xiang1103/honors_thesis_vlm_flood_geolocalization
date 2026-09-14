@@ -61,7 +61,7 @@ before touching `adapters.py` or adding an outlet.
 
 ```bash
 # crawl
-python3 scraping/scrape.py --outlets all --resume
+python3 scraping/scrape.py --outlets all
 python3 scraping/scrape.py --list-outlets
 
 # classify images (local GPU, free, default backend)
@@ -87,7 +87,7 @@ Long crawls: `./scraping/run_crawl.sh` (tmux, survives disconnect).
 scrape.py  --calls verify_text.score_record() INLINE, per article-->
     scrape_data/<outlet>_flood.jsonl      per-outlet, appended+flushed per article,
         |                                 merged and DELETED when the outlet finishes
-    data/news_scrape_results.json         THE corpus: what --resume reads and
+    data/news_scrape_results.json         THE corpus: the seen-URL set and
         |                                 what every downstream reader consumes
 verify_images_vlm.py -->
     data/verified_images_news.json    one row per (article, image) with yes/no
@@ -114,7 +114,7 @@ ids when a publisher inserted a photo. **Never hash article_url alone** —
 4,651 of 8,665 rows would collide and be silently skipped.
 
 **One corpus, no per-outlet JSON.** `data/news_scrape_results.json` is the
-source of truth: `--resume` reads it, every outlet's finalize merges into it,
+source of truth: the crawl's seen-set comes from it, every outlet's finalize merges into it,
 and every downstream reader consumes it. The per-outlet **JSONL** still exists
 during a run (appended and flushed per article, so a kill mid-outlet loses
 nothing) and is deleted once merged. `load_corpus_urls()` parses the corpus
@@ -160,7 +160,7 @@ only learns an outlet's articles at `finalize()`, i.e. after the whole outlet
 completes -- floodlist is 4,227 articles at `--delay 0.6`, roughly 45 minutes.
 The JSONL is the only thing holding work inside that window. A `.jsonl` found
 in `scrape_data/` is therefore **unmerged work, not garbage**: re-run that
-outlet with `--resume` and it is folded in and cleaned up automatically. Never
+outlet and it is folded in and cleaned up automatically. Never
 delete one to "tidy up".
 
 **Guards on the corpus write, and the ones deliberately absent.** `finalize()`
