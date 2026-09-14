@@ -1,5 +1,8 @@
 #!/usr/bin/env python3
-"""Find duplicate images by CONTENT and drop the duplicate rows.
+"""
+calcualtes the image hashes to compare/look for duplicates 
+
+Find duplicate images by CONTENT and drop the duplicate rows.
 
 The occurrence id keys `(article_url, image_url)`. It is an identity key for
 resume, not a similarity key -- so the same photograph served from two URLs

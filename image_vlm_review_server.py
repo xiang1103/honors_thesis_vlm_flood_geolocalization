@@ -111,6 +111,11 @@ def make_handler(catalog: dict):
             super().do_GET()
 
         def end_headers(self):
+            # Never cache: this is a local dev server whose HTML/JS change
+            # constantly. A browser holding a stale app.js against fresh markup
+            # fails silently -- the script dies on a missing element and the
+            # page sits on its initial "Loading..." text forever.
+            self.send_header("Cache-Control", "no-store, must-revalidate")
             self.send_header("X-Content-Type-Options", "nosniff")
             self.send_header("Referrer-Policy", "no-referrer")
             self.send_header(

@@ -41,38 +41,6 @@
       </section>
     </main>
 
-    <dialog id="viewer">
-      <div class="viewer-shell">
-        <button class="viewer-close" id="closeViewer" type="button" aria-label="Close image viewer">×</button>
-        <div class="viewer-image-wrap">
-          <img id="viewerImage" alt="">
-          <div class="image-fallback" id="viewerFallback" hidden>
-            <strong>Image could not be loaded</strong>
-            <span>The publisher may block direct image loading or the URL may have expired.</span>
-          </div>
-        </div>
-        <aside class="viewer-details">
-          <div class="viewer-nav">
-            <button id="previousImage" type="button">← Previous</button>
-            <span id="viewerPosition"></span>
-            <button id="nextImage" type="button">Next →</button>
-          </div>
-          <div id="viewerBadges" class="badges"></div>
-          <h2 id="viewerTitle"></h2>
-          <p id="viewerCaption" class="viewer-caption"></p>
-          <dl id="viewerMetadata"></dl>
-          <div class="link-row">
-            <a id="viewerArticleLink" target="_blank" rel="noopener noreferrer">Open article ↗</a>
-            <a id="viewerImageLink" target="_blank" rel="noopener noreferrer">Open original image ↗</a>
-          </div>
-          <div class="review-panel">
-            <p>Is this useful for flood geolocation?</p>
-            <div id="viewerReviewButtons" class="review-buttons"></div>
-            <small>Keyboard: 1 useful · 2 reject · 3 unsure · ←/→ navigate</small>
-          </div>
-        </aside>
-      </div>
-    </dialog>
 
     <script src="app.js"></script>
   </body>

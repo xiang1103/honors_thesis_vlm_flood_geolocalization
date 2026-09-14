@@ -275,3 +275,21 @@ a { color: var(--blue); }
   background: #3a2c10;
   color: #ffe3ad;
 }
+
+/* The image and headline both open the source article in a new tab. Links
+   inherit the card's colour so the layout is unchanged -- the cue is the
+   cursor and the hover underline, not a blue heading. */
+.image-button {
+  display: block;
+  cursor: pointer;
+}
+
+.card-title-link {
+  color: inherit;
+  text-decoration: none;
+}
+
+.card-title-link:hover,
+.card-title-link:focus-visible {
+  text-decoration: underline;
+}

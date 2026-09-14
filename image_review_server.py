@@ -16,7 +16,6 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
-import re
 from collections import Counter
 from datetime import datetime, timezone
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
@@ -27,14 +26,6 @@ from urllib.parse import urlparse
 PROJECT_DIR = Path(__file__).resolve().parent
 DEFAULT_RESULTS = PROJECT_DIR / "data" / "verified_images_news.json"
 STATIC_DIR = PROJECT_DIR / "image_review_web"
-
-# These are useful review hints, not ground-truth classifications.
-NON_STREET_HINT = re.compile(
-    r"\b(map|satellite|radar|forecast|file photo|archival|illustration|"
-    r"graphic|chart|headshot|portrait|weather model|storm track)\b",
-    re.IGNORECASE,
-)
-
 
 #: Bump when the shape of `review_id()` changes. The browser stores this
 #: alongside the decisions it saved, so a future change is detected and
@@ -120,15 +111,12 @@ def load_catalog(results_file: Path, include_rejected: bool = False) -> dict:
                 "article_title": str(row.get("article_title") or "Untitled article"),
                 "article_date": str(row.get("article_date") or ""),
                 "article_url": article_url,
-                "flood_score": row.get("article_flood_score"),
-                "flood_verified": bool(row.get("article_flood_verified")),
                 "image_url": image_url,
                 "caption": caption,
                 "image_source": str(row.get("image_source") or "unknown"),
                 "image_index": image_index + 1,
                 "model_answer": answer,
                 "model_output": str(row.get("model_output") or "").strip(),
-                "suspect_nonstreet": bool(NON_STREET_HINT.search(caption)),
                 "source_file": results_file.name,
             }
         )
@@ -157,8 +145,6 @@ def load_catalog(results_file: Path, include_rejected: bool = False) -> dict:
             "unique_images": len(duplicate_counts),
             "model_yes": sum(1 for i in items if i["model_answer"] == "yes"),
             "model_no": sum(1 for i in items if i["model_answer"] == "no"),
-            "verified_images": sum(item["flood_verified"] for item in items),
-            "suspect_nonstreet": sum(item["suspect_nonstreet"] for item in items),
             "outlets": outlets,
         },
         "items": items,
@@ -183,6 +169,11 @@ def make_handler(catalog: dict):
             super().do_GET()
 
         def end_headers(self):
+            # Never cache: this is a local dev server whose HTML/JS change
+            # constantly. A browser holding a stale app.js against fresh markup
+            # fails silently -- the script dies on a missing element and the
+            # page sits on its initial "Loading..." text forever.
+            self.send_header("Cache-Control", "no-store, must-revalidate")
             self.send_header("X-Content-Type-Options", "nosniff")
             self.send_header("Referrer-Policy", "no-referrer")
             self.send_header(

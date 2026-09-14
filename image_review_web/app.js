@@ -21,7 +21,6 @@ const state = {
   summary: null,
   reviews: loadReviews(),
   page: 1,
-  viewerIndex: -1,
 };
 
 const ui = {
@@ -34,20 +33,6 @@ const ui = {
   nextPage: document.querySelector("#nextPage"),
   grid: document.querySelector("#imageGrid"),
   empty: document.querySelector("#emptyState"),
-  viewer: document.querySelector("#viewer"),
-  closeViewer: document.querySelector("#closeViewer"),
-  viewerImage: document.querySelector("#viewerImage"),
-  viewerFallback: document.querySelector("#viewerFallback"),
-  viewerPosition: document.querySelector("#viewerPosition"),
-  viewerBadges: document.querySelector("#viewerBadges"),
-  viewerTitle: document.querySelector("#viewerTitle"),
-  viewerCaption: document.querySelector("#viewerCaption"),
-  viewerMetadata: document.querySelector("#viewerMetadata"),
-  viewerArticleLink: document.querySelector("#viewerArticleLink"),
-  viewerImageLink: document.querySelector("#viewerImageLink"),
-  viewerReviewButtons: document.querySelector("#viewerReviewButtons"),
-  previousImage: document.querySelector("#previousImage"),
-  nextImage: document.querySelector("#nextImage"),
 };
 
 function loadReviews() {
@@ -135,11 +120,6 @@ function addBadge(parent, text, className = "") {
   parent.append(node("span", `badge ${className}`.trim(), text));
 }
 
-function formatScore(score) {
-  const numeric = Number(score);
-  return Number.isFinite(numeric) ? numeric.toFixed(3) : "—";
-}
-
 function reviewButtons(item, compact = false) {
   const container = node("div", "review-buttons");
   const choices = [
@@ -166,25 +146,33 @@ function setReview(item, value) {
   else state.reviews[item.id] = value;
   saveReviews();
   renderSummary();
-  if (ui.viewer.open) renderViewer();
   renderGrid();
 }
 
 function badgesFor(item) {
   const badges = node("div", "badges");
+  // Only what varies between cards. Every image here is already from a
+  // flood-verified article, already judged street-view by the model, and
+  // already unique by URL -- badges for those said the same thing on every
+  // card, which is noise rather than information.
   addBadge(badges, item.outlet.toUpperCase(), "outlet");
-  if (item.flood_verified) addBadge(badges, "article verified", "verified");
-  else addBadge(badges, "article unverified", "warning");
-  if (item.suspect_nonstreet) addBadge(badges, "map / file-photo hint", "warning");
-  if (item.duplicate_count > 1) addBadge(badges, `${item.duplicate_count}× repeated URL`, "warning");
   if (state.reviews[item.id]) addBadge(badges, `review: ${state.reviews[item.id]}`);
   return badges;
 }
 
-function imageSurface(item, onOpen) {
-  const button = node("button", "image-button");
-  button.type = "button";
-  button.setAttribute("aria-label", `Open image: ${item.caption || item.article_title}`);
+function articleLink(item, className, text) {
+  const link = node("a", className, text);
+  link.href = item.article_url;
+  link.target = "_blank";
+  // noopener: the opened tab must not get a handle back to this page, which
+  // still holds the review decisions. noreferrer keeps the publisher from
+  // seeing a localhost referrer.
+  link.rel = "noopener noreferrer";
+  return link;
+}
+
+function imageSurface(item) {
+  const figure = articleLink(item, "image-button");
   const image = node("img");
   image.src = item.image_url;
   image.alt = item.caption || `News image from ${item.article_title}`;
@@ -199,17 +187,18 @@ function imageSurface(item, onOpen) {
     image.hidden = true;
     fallback.hidden = false;
   }, { once: true });
-  button.append(image, fallback);
-  button.addEventListener("click", onOpen);
-  return button;
+  figure.append(image, fallback);
+  return figure;
 }
 
 function renderCard(item, index) {
   const card = node("article", "image-card");
-  card.append(imageSurface(item, () => openViewer(index)));
+  card.append(imageSurface(item));
   const body = node("div", "card-body");
   body.append(badgesFor(item));
-  body.append(node("h2", "card-title", item.article_title));
+  const heading = node("h2", "card-title");
+  heading.append(articleLink(item, "card-title-link", item.article_title));
+  body.append(heading);
   body.append(node("p", "caption", item.caption || "No caption available."));
   body.append(reviewButtons(item, true));
   card.append(body);
@@ -248,56 +237,6 @@ function renderGrid() {
   ui.nextPage.disabled = state.page >= pageCount;
 }
 
-function openViewer(index) {
-  state.viewerIndex = index;
-  renderViewer();
-  ui.viewer.showModal();
-}
-
-function metadataRow(term, detail) {
-  const fragment = document.createDocumentFragment();
-  fragment.append(node("dt", "", term), node("dd", "", detail));
-  return fragment;
-}
-
-function renderViewer() {
-  const item = state.filtered[state.viewerIndex];
-  if (!item) return;
-  ui.viewerImage.hidden = false;
-  ui.viewerFallback.hidden = true;
-  ui.viewerImage.src = item.image_url;
-  ui.viewerImage.alt = item.caption || `News image from ${item.article_title}`;
-  ui.viewerImage.referrerPolicy = "no-referrer";
-  ui.viewerImage.onerror = () => {
-    ui.viewerImage.hidden = true;
-    ui.viewerFallback.hidden = false;
-  };
-  ui.viewerPosition.textContent = `${state.viewerIndex + 1} / ${state.filtered.length}`;
-  ui.viewerBadges.replaceChildren(...badgesFor(item).childNodes);
-  ui.viewerTitle.textContent = item.article_title;
-  ui.viewerCaption.textContent = item.caption || "No caption available.";
-  ui.viewerMetadata.replaceChildren(
-    metadataRow("Outlet", item.outlet.toUpperCase()),
-    metadataRow("Article date", item.article_date || "Unknown"),
-    metadataRow("Flood score", formatScore(item.flood_score)),
-    metadataRow("Image", `${item.image_index} of ${item.article_image_count}`),
-    metadataRow("Markup source", item.image_source),
-  );
-  ui.viewerArticleLink.href = item.article_url || "#";
-  ui.viewerArticleLink.hidden = !item.article_url;
-  ui.viewerImageLink.href = item.image_url;
-  ui.viewerReviewButtons.replaceChildren(...reviewButtons(item).childNodes);
-  ui.previousImage.disabled = state.viewerIndex <= 0;
-  ui.nextImage.disabled = state.viewerIndex >= state.filtered.length - 1;
-}
-
-function moveViewer(delta) {
-  const next = state.viewerIndex + delta;
-  if (next < 0 || next >= state.filtered.length) return;
-  state.viewerIndex = next;
-  renderViewer();
-}
-
 function exportReviews() {
   const selected = state.items
     .filter((item) => state.reviews[item.id])
@@ -311,8 +250,6 @@ function exportReviews() {
       article_url: item.article_url,
       image_url: item.image_url,
       caption: item.caption,
-      flood_verified: item.flood_verified,
-      flood_score: item.flood_score,
     }));
   const blob = new Blob([JSON.stringify(selected, null, 2)], { type: "application/json" });
   const url = URL.createObjectURL(blob);
@@ -329,20 +266,7 @@ ui.outlet.addEventListener("change", () => {
 });
 ui.previousPage.addEventListener("click", () => { state.page -= 1; renderGrid(); window.scrollTo({ top: 0, behavior: "smooth" }); });
 ui.nextPage.addEventListener("click", () => { state.page += 1; renderGrid(); window.scrollTo({ top: 0, behavior: "smooth" }); });
-ui.closeViewer.addEventListener("click", () => ui.viewer.close());
-ui.previousImage.addEventListener("click", () => moveViewer(-1));
-ui.nextImage.addEventListener("click", () => moveViewer(1));
 ui.exportReviews.addEventListener("click", exportReviews);
-ui.viewer.addEventListener("click", (event) => { if (event.target === ui.viewer) ui.viewer.close(); });
-document.addEventListener("keydown", (event) => {
-  if (!ui.viewer.open) return;
-  if (event.key === "ArrowLeft") moveViewer(-1);
-  if (event.key === "ArrowRight") moveViewer(1);
-  const item = state.filtered[state.viewerIndex];
-  if (event.key === "1") setReview(item, "useful");
-  if (event.key === "2") setReview(item, "reject");
-  if (event.key === "3") setReview(item, "unsure");
-});
 
 fetch("/api/images")
   .then((response) => {
