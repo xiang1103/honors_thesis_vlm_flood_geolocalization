@@ -19,3 +19,4 @@ venv/
 scrape_data/
 
 data/image_hashes.json
+data/news_scrape_results.json
