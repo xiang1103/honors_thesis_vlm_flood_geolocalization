@@ -32,12 +32,16 @@ from huggingface_hub import InferenceClient
 
 
 MODEL = "Qwen/Qwen3.8-27B:novita"
-#: Selects usable STREET-LEVEL imagery, not flood imagery. Flood relevance is
-#: already established upstream at the article level by verify.py's
-#: flood_score/flood_verified, so every image reaching this prompt comes from a
-#: flood story; what this pass decides is whether the photo carries the
-#: ground-level detail geolocation needs. A `yes` therefore does NOT assert
-#: that water is visible.
+#: Selects GOOGLE-STREET-VIEW-LIKE GEOMETRY, not flood imagery and not merely
+#: "outdoors". The three clauses are load-bearing and were written against
+#: observed failures of the previous, looser prompt (see CLAUDE.md, "Dataset
+#: direction"): a crowd close-up, an elevated view over rooftops, and a
+#: looking-down-into-a-camp shot all passed it. Hence the explicit demands for
+#: camera height, visible ground surface, and recognisable surroundings.
+#:
+#: Flooding is deliberately NOT required. The project wants street-view
+#: geometry first; flood filtering is a separate, later decision, and the
+#: article-level flood score already constrains the corpus.
 #:
 #: Resume is deliberately PROMPT-AGNOSTIC: editing this string does not
 #: re-classify images that already have an answer. Re-running is expensive, and
@@ -45,17 +49,21 @@ MODEL = "Qwen/Qwen3.8-27B:novita"
 #: that after an edit the canonical JSON holds answers from more than one
 #: prompt; each row records the exact `prompt` and `model` that produced it, so
 #: the mix is always visible per row, and the run prints how many rows predate
-#: the current prompt. To re-score everything under a new prompt, move the
-#: canonical JSON aside so every occurrence reads as pending.
+#: the current prompt. To re-score everything under a new prompt, clear the
+#: existing rows so every occurrence reads as pending.
 PROMPT = (
-    "Is this a street-level photograph? Answer yes if the image shows anything "
-    "a street view would contain: roads, streets, cars or other vehicles, "
-    "people, buildings, houses, storefronts, signs, or similar ground-level "
-    "surroundings. Water does not need to be present, and flooding is not "
-    "required. Answer no only if the image is not a ground-level photograph of "
-    "a real place, such as a map, radar or weather graphic, satellite or "
-    "aerial view, chart, diagram, logo, screenshot, or a portrait or headshot "
-    "with no surroundings visible. Answer yes or no."
+    "Does this photograph look like a street-level view of a road or street, "
+    "similar to Google Street View? Answer yes only if ALL of the following "
+    "hold: (1) the camera is at ground level, roughly the height of a person "
+    "or a vehicle - not looking down from a balcony, bridge, drone, "
+    "helicopter, or hillside; (2) a road, street, footpath, or other outdoor "
+    "ground surface is visible and takes up a meaningful part of the frame; "
+    "(3) the surroundings are visible - building facades, walls, fences, "
+    "parked vehicles, poles, or signs - enough that the place could be "
+    "recognised again. Answer no if the image is mainly a close-up of people, "
+    "faces, animals, or objects; an interior; an elevated or aerial view; "
+    "open water or landscape with no street; or a map, chart, diagram, or "
+    "graphic. Answer yes or no."
 )
 
 ANSWER_RE = re.compile(r"\b(yes|no)\b", re.IGNORECASE)

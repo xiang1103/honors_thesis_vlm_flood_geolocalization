@@ -1,8 +1,18 @@
 # vlm_flood
 
-Dataset pipeline for VLM flood geolocalization: crawl flood news from 29
-outlets, then label every image for whether it is a usable street-level
-photograph. Honors thesis project.
+Honors thesis project. **The goal is visual geolocalization**: given a
+street-level image, recover where it was taken. The dataset being built is
+street-view imagery of flooded (and un-flooded) scenes -- SF-XL in spirit, but
+flood-focused.
+
+Coordinates are NOT required for the current phase: the near-term goal is
+simply to collect images with street-view *geometry*. That is a deliberate
+scope decision by the owner, with a known cost recorded under "Dataset
+direction" below.
+
+The existing pipeline (crawl news -> classify images) was built before this was
+settled and is being re-evaluated against it. Do not assume the news corpus is
+the intended final source.
 
 ## Git — do not commit or push
 
@@ -216,11 +226,84 @@ data/image_hashes.json           2.0M   fingerprint cache for dedupe
   Mixing them with street-level rows blends two definitions.
 - 12 images are permanently unfetchable (dead URLs); they stay pending.
 
+## Dataset direction (2026-09-13) — READ BEFORE EXTENDING THE SCRAPER
+
+**What "street-view" means here.** Google-Street-View-like geometry: camera at
+person or vehicle height, the road surface occupying a meaningful part of the
+frame, and enough surroundings (facades, fences, poles, signs, parked cars)
+that the place could be recognised again. NOT: close-ups where people or
+objects fill the frame, interiors, elevated or aerial vantage points, open
+water or landscape with no street.
+
+**News outlets are a mediocre source for this, measured.** A random sample of
+images the current prompt accepted was inspected directly, not via captions:
+
+| image | what it is | street-view? |
+|---|---|---|
+| Guardian, Portugal | flooded street, facades, numbered doors, eye level | yes |
+| floodlist, Romania | mud-covered road, signs, eye level | yes |
+| floodlist, Tbilisi | crowd close-up, people fill frame | no |
+| floodlist, Chesil Beach | elevated view over rooftops | no |
+| floodlist, Bangladesh | looking down into a camp from height | no |
+
+Two of five. Photojournalism systematically prefers human subjects, close-ups
+and elevated vantage points -- precisely the properties that disqualify an
+image here. **A caption saying "street" describes the EVENT, not the camera.**
+Do not infer street-view geometry from caption text; it was wrong when tried.
+
+Expect roughly 20-40% of what the current filter accepts to be usable, i.e.
+~1,600-2,800 of 8,044. Run the strict prompt below over the existing corpus to
+get the real number before scraping more news.
+
+**Sources where the geometry is guaranteed, not filtered for:**
+
+1. **Dashcam / drive-through-flood video** (YouTube etc.) -- camera at vehicle
+   height, road filling the frame, facades passing. Structurally the same
+   geometry as Street View, which is itself car-mounted. Many usable frames
+   per clip.
+2. **Mapillary** -- street-level by definition, contributor-uploaded, carries
+   GPS *and capture timestamps*, so the same coordinates can be pulled before
+   and during a flood event. CC-BY-SA, so redistributable.
+3. News -- keep as a supplement; low yield, no control at capture time.
+
+**Licensing.** 25% of accepted images are credited to Getty/EPA/AFP/Reuters and
+the rest are outlet-owned. None are redistributable. The pipeline stores URLs
+and captions and never pixels -- keep it that way and news stays usable;
+shipping JPEGs in a release would be infringement. Wikimedia Commons and
+CC-filtered Flickr are the sources where pixels CAN be redistributed.
+
+**Proposed prompt** (not yet applied; `PROMPT` in
+`verification/verify_images_vlm.py:50` still selects any ground-level photo and
+explicitly does not require flooding):
+
+> Does this photograph look like a street-level view of a road or street,
+> similar to Google Street View? Answer yes only if ALL of the following hold:
+> (1) the camera is at ground level, roughly the height of a person or a
+> vehicle — not looking down from a balcony, bridge, drone, helicopter, or
+> hillside; (2) a road, street, footpath, or other outdoor ground surface is
+> visible and takes up a meaningful part of the frame; (3) the surroundings are
+> visible — building facades, walls, fences, parked vehicles, poles, or signs —
+> enough that the place could be recognised again. Answer no if the image is
+> mainly a close-up of people, faces, animals, or objects; an interior; an
+> elevated or aerial view; open water or landscape with no street; or a map,
+> chart, diagram, or graphic.
+
+Whether to also require visible flooding is undecided -- one clause either way.
+Applying it means clearing existing rows so they read as pending (resume is
+prompt-agnostic), ~95 min of free GPU for all 8,044.
+
+**The cost of skipping coordinates.** They cannot be retrofitted: a news photo
+with no GPS will never become a geolocalization training example. Uncoordinated
+flood street imagery is still useful as the target domain for domain adaptation
+and as a qualitative query set, but geolocalization cannot be EVALUATED without
+ground truth, so a coordinate-bearing set has to exist eventually even if it is
+small and hand-labelled.
+
 ## Open work
 
-1. Content hash checked at classify time, so dedupe stops being undone.
-2. Re-score the 1,624 old-prompt rows (~17 min GPU) for one consistent
-   criterion — blocked for AP's 23 by the 403 above.
+1. Apply the strict street-view prompt above and re-score; measure real yield.
+2. Probe dashcam/YouTube frame extraction and Mapillary coverage as sources.
 3. Near-duplicate detection with a signal that works.
-4. `:8766` site still says "Flood image results / Kept by model"; `yes` now
-   means street-level, not flooding. Relabel.
+4. `:8766` site still says "Flood image results / Kept by model"; relabel.
+5. Build a small hand-labelled ground-truth set (the :8765 site exports
+   decisions) so model and prompt changes can be measured instead of guessed.

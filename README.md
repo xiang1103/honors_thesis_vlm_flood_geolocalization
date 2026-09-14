@@ -45,7 +45,8 @@ python3 local_vlm/download_model.py                     # one time
 python3 verification/verify_images_vlm.py --limit 20  # small test run first
 python3 verification/verify_images_vlm.py --workers 4
 python3 verification/verify_images_vlm.py --device-map cuda:0   # pin one GPU
-```
+``` 
+Alternative VLM model: gemma-4-31B-it 
 
 ## 3. Review sites
 
@@ -55,6 +56,18 @@ Two separate local sites, each on its own port. Both can run at once.
 python3 image_review_server.py          # http://127.0.0.1:8765  — human review
 python3 image_vlm_review_server.py      # http://127.0.0.1:8766  — model results
 ```
+
+## Good sites 
+or "street-view flooded, crowdsourced, with coordinates," Mapillary already is the social platform 
+  you're describing. It's user-contributed street-level imagery whose entire purpose is carrying GPS  
+  and heading — and it has capture timestamps, so you can pull the same coordinates before and during 
+  a flood event. No other crowdsourced source gives you that pairing.                                 
+                                                                                                      
+  Also worth checking before building anything: CrisisMMD and MEDIC (disaster social-media images with
+  labels, no coords), FloodNet (UAV imagery of post-Harvey flooding, georeferenced but aerial), and   
+  Copernicus EMS (flood extents, satellite). None are street-level VPR datasets, but they'll tell you 
+  what's been tried.
+
 
 ## Limitations 
 - Near identical images (ex: cropped) are not detected by hashing 
