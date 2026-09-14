@@ -20,6 +20,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import re
 from collections import defaultdict
 from datetime import datetime, timezone
 from pathlib import Path
@@ -27,6 +28,55 @@ from pathlib import Path
 PROJECT = Path(__file__).resolve().parent
 DEFAULT_VERIFICATION = PROJECT / "data" / "verified_images_news.json"
 DEFAULT_DEST = PROJECT / "data" / "meta_data.json"
+
+
+DATE_RE = re.compile(r"(\d{4})-(\d{2})-(\d{2})")
+
+
+def parse_date(value):
+    """Tolerant ISO-ish date -> naive datetime, or None.
+
+    Outlets emit offsets without a colon ('2026-08-30T07:04:00-0400'), which
+    fromisoformat rejects before 3.11, so fall back to a plain YYYY-MM-DD
+    match rather than dropping the record.
+    """
+    if not value:
+        return None
+    try:
+        return datetime.fromisoformat(str(value).replace("Z", "+00:00")).replace(tzinfo=None)
+    except ValueError:
+        pass
+    match = DATE_RE.search(str(value))
+    if match:
+        try:
+            return datetime(*(int(g) for g in match.groups()))
+        except ValueError:
+            return None
+    return None
+
+
+def date_range(rows: list[dict]) -> dict:
+    """Observed publication span of the dataset.
+
+    MEASURED from the rows, never taken from the crawl's --since-days flag.
+    That flag filters what a single run keeps; it does not remove older
+    articles already collected, so the two disagree -- the corpus reaches back
+    14 years while the last crawl ran with a 10-year window.
+    """
+    dates = [d for d in (parse_date(r.get("article_date")) for r in rows) if d]
+    if not dates:
+        return {"earliest": None, "latest": None, "span_days": 0,
+                "span_years": 0.0, "dated": 0, "undated": len(rows)}
+    earliest, latest = min(dates), max(dates)
+    span = (latest - earliest).days
+    return {
+        "earliest": earliest.date().isoformat(),
+        "latest": latest.date().isoformat(),
+        "span_days": span,
+        "span_years": round(span / 365.25, 1),
+        "dated": len(dates),
+        "undated": len(rows) - len(dates),
+    }
 
 
 def build(verification_path: Path) -> dict:
@@ -70,6 +120,7 @@ def build(verification_path: Path) -> dict:
         # Carried through so the snapshot says which criteria produced the
         # yes/no counts -- they are meaningless without it.
         "prompt": payload.get("current_prompt") or payload.get("prompt"),
+        "date_range": date_range(rows),
         "totals": totals,
         "by_outlet": {k: dict(per[k]) for k in sorted(per)},
     }
@@ -98,9 +149,12 @@ def refresh(verification_path: Path = DEFAULT_VERIFICATION,
 
     if not quiet:
         t = meta["totals"]
+        d = meta["date_range"]
         print(f"metadata: {dest}")
         print(f"  articles {t['articles']} | images {t['images']} "
               f"| yes {t['yes']} no {t['no']} | outlets {t['outlets']}")
+        print(f"  span {d['earliest']} -> {d['latest']} "
+              f"({d['span_years']} years, {d['undated']} undated)")
     return meta
 
 

@@ -27,7 +27,13 @@ meta_data.json: track meta data information of verified news/images
 ## 1. Scrape 
 Scraping process: 
 ```
-load all collected news (news_scrape_results.json) ──► write new scrpapes to per_outlet.jsonl ──► merge these jsonl into the main corpus
+1. discover()           walk the outlet's index/tag pages → candidate URLs
+  2. filter against seen   urls = [u for u in discover(...) if u not in seen]   ← BEFORE fetching
+  3. fetch each survivor   parse text + extract images (deduped by URL within the article)
+  4. score inline          verify_text.score_record() → flood_score, flood_verified
+  5. window filters        --since-days, --min-images
+  6. append → scrape_data/<outlet>_flood.jsonl    (flushed per article)
+  7. finalize()            merge JSONL → corpus, atomic write, delete JSONL
 ```
 
 ```bash
@@ -40,6 +46,20 @@ python3 scraping/scrape.py --list-outlets                    # 29 outlets + expe
 
 
 ## 2. VLM image verification
+Steps: 
+```
+1. enumerate    images from flood_verified articles only          
+  2. load         already processed images
+  3. pending      = occurrences not already in the results file
+  4. group        pending by image_url              
+  5. url_cache    hit → copy the answer, no fetch, no GPU
+  6. per URL      fetch → hash → sha_cache hit? reuse, skip GPU
+                            else → run the model    
+  7. append       each result to scrape_data/…jsonl, flushed per record
+  8. merge        existing ∪ this run's JSONL → atomic write
+  9. delete       the JSONL                         
+  10. refresh     meta_data.json 
+``` 
 
 ```bash
 python3 local_vlm/download_model.py                     # one time
