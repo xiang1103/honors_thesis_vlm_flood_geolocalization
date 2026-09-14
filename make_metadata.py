@@ -27,6 +27,7 @@ from pathlib import Path
 
 PROJECT = Path(__file__).resolve().parent
 DEFAULT_VERIFICATION = PROJECT / "data" / "verified_images_news.json"
+DEFAULT_CORPUS = PROJECT / "data" / "news_scrape_results.json"
 DEFAULT_DEST = PROJECT / "data" / "meta_data.json"
 
 
@@ -55,31 +56,44 @@ def parse_date(value):
     return None
 
 
-def date_range(rows: list[dict]) -> dict:
-    """Observed publication span of the dataset.
+def scraped_stats(corpus_path: Path) -> dict:
+    """What the CRAWL collected: size and publication span of the corpus.
 
-    MEASURED from the rows, never taken from the crawl's --since-days flag.
-    That flag filters what a single run keeps; it does not remove older
-    articles already collected, so the two disagree -- the corpus reaches back
-    14 years while the last crawl ran with a 10-year window.
+    Read from `news_scrape_results.json`, not the verification file, because
+    that is the only record of what was scraped -- the dataset is a filtered
+    subset of it. The two blocks in this file therefore answer different
+    questions and are deliberately not comparable line by line.
+
+    The span is MEASURED, never taken from the crawl's --since-days flag: that
+    flag filters what a single run keeps and does not remove older articles
+    already collected, so the two disagree (the corpus reaches back 14 years
+    while the last crawl ran with a 10-year window).
     """
-    dates = [d for d in (parse_date(r.get("article_date")) for r in rows) if d]
-    if not dates:
-        return {"earliest": None, "latest": None, "span_days": 0,
-                "span_years": 0.0, "dated": 0, "undated": len(rows)}
-    earliest, latest = min(dates), max(dates)
-    span = (latest - earliest).days
-    return {
-        "earliest": earliest.date().isoformat(),
-        "latest": latest.date().isoformat(),
-        "span_days": span,
-        "span_years": round(span / 365.25, 1),
-        "dated": len(dates),
-        "undated": len(rows) - len(dates),
+    if not Path(corpus_path).is_file():
+        return {}
+    corpus = json.loads(Path(corpus_path).read_text(encoding="utf-8"))
+    images = sum(len(a.get("images") or []) for a in corpus)
+    dates = [d for d in (parse_date(a.get("date")) for a in corpus) if d]
+    stats = {
+        "articles": len(corpus),
+        "images": images,
+        "articles_with_images": sum(1 for a in corpus if a.get("images")),
+        "outlets": len({a.get("outlet") for a in corpus if a.get("outlet")}),
     }
+    if dates:
+        earliest, latest = min(dates), max(dates)
+        span = (latest - earliest).days
+        stats.update({
+            "earliest": earliest.date().isoformat(),
+            "latest": latest.date().isoformat(),
+            "span_days": span,
+            "span_years": round(span / 365.25, 1),
+            "undated": len(corpus) - len(dates),
+        })
+    return stats
 
 
-def build(verification_path: Path) -> dict:
+def build(verification_path: Path, corpus_path: Path = None) -> dict:
     payload = json.loads(verification_path.read_text(encoding="utf-8"))
     rows = payload.get("results") or []
 
@@ -105,29 +119,32 @@ def build(verification_path: Path) -> dict:
     for outlet, urls in articles_by_outlet.items():
         per[outlet]["articles"] = len(urls)
 
-    totals = {
+    verified = {
         "articles": len(all_articles),
         "images": len(rows),
         "yes": sum(1 for r in rows if r.get("answer") == "yes"),
         "no": sum(1 for r in rows if r.get("answer") == "no"),
         "outlets": len(per),
     }
-    if totals["images"]:
-        totals["yes_rate"] = round(totals["yes"] / totals["images"], 4)
+    if verified["images"]:
+        verified["yes_rate"] = round(verified["yes"] / verified["images"], 4)
 
     return {
         "generated_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
         # Carried through so the snapshot says which criteria produced the
         # yes/no counts -- they are meaningless without it.
         "prompt": payload.get("current_prompt") or payload.get("prompt"),
-        "date_range": date_range(rows),
-        "totals": totals,
+        # Two blocks, two questions: what the crawl collected, and what
+        # survived into the dataset. Never merge them into one set of totals.
+        "scraped": scraped_stats(corpus_path or DEFAULT_CORPUS),
+        "verified": verified,
         "by_outlet": {k: dict(per[k]) for k in sorted(per)},
     }
 
 
 def refresh(verification_path: Path = DEFAULT_VERIFICATION,
-            dest: Path = DEFAULT_DEST, quiet: bool = False) -> dict | None:
+            dest: Path = DEFAULT_DEST, quiet: bool = False,
+            corpus_path: Path = None) -> dict | None:
     """Regenerate the snapshot. Returns the metadata, or None if there is
     nothing to describe yet.
 
@@ -140,7 +157,7 @@ def refresh(verification_path: Path = DEFAULT_VERIFICATION,
     if not verification_path.is_file():
         return None
 
-    meta = build(verification_path)
+    meta = build(verification_path, corpus_path or DEFAULT_CORPUS)
     dest.parent.mkdir(parents=True, exist_ok=True)
     tmp = dest.with_name(dest.name + ".tmp")
     tmp.write_text(json.dumps(meta, ensure_ascii=False, indent=2) + "\n",
@@ -148,13 +165,14 @@ def refresh(verification_path: Path = DEFAULT_VERIFICATION,
     os.replace(tmp, dest)
 
     if not quiet:
-        t = meta["totals"]
-        d = meta["date_range"]
+        v, sc = meta["verified"], meta["scraped"]
         print(f"metadata: {dest}")
-        print(f"  articles {t['articles']} | images {t['images']} "
-              f"| yes {t['yes']} no {t['no']} | outlets {t['outlets']}")
-        print(f"  span {d['earliest']} -> {d['latest']} "
-              f"({d['span_years']} years, {d['undated']} undated)")
+        if sc:
+            print(f"  scraped  {sc['articles']} articles | {sc['images']} images "
+                  f"| {sc.get('earliest')} -> {sc.get('latest')} "
+                  f"({sc.get('span_years')} years)")
+        print(f"  verified {v['articles']} articles | {v['images']} images "
+              f"| yes {v['yes']} no {v['no']} | outlets {v['outlets']}")
     return meta
 
 
@@ -176,12 +194,13 @@ def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--verification", type=Path, default=DEFAULT_VERIFICATION)
+    ap.add_argument("--corpus", type=Path, default=DEFAULT_CORPUS)
     ap.add_argument("--dest", type=Path, default=DEFAULT_DEST)
     args = ap.parse_args()
 
     if not args.verification.is_file():
         raise SystemExit(f"missing: {args.verification}")
-    refresh(args.verification, args.dest)
+    refresh(args.verification, args.dest, corpus_path=args.corpus)
     return 0
 
 

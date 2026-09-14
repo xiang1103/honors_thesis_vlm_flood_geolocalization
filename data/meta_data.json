@@ -1,15 +1,18 @@
 {
-  "generated_at": "2026-09-14T17:25:03+00:00",
+  "generated_at": "2026-09-14T17:47:03+00:00",
   "prompt": "Does this photograph look like a street-level view of a road or street, similar to Google Street View? Answer yes only if ALL of the following hold: (1) the camera is at ground level, roughly the height of a person or a vehicle - not looking down from a balcony, bridge, drone, helicopter, or hillside; (2) a road, street, footpath, or other outdoor ground surface is visible and takes up a meaningful part of the frame; (3) the surroundings are visible - building facades, walls, fences, parked vehicles, poles, or signs - enough that the place could be recognised again. Answer no if the image is mainly a close-up of people, faces, animals, or objects; an interior; an elevated or aerial view; open water or landscape with no street; or a map, chart, diagram, or graphic. Answer yes or no.",
-  "date_range": {
+  "scraped": {
+    "articles": 11219,
+    "images": 18273,
+    "articles_with_images": 8681,
+    "outlets": 28,
     "earliest": "2012-06-25",
     "latest": "2026-09-13",
-    "span_days": 5192,
+    "span_days": 5193,
     "span_years": 14.2,
-    "dated": 12611,
-    "undated": 0
+    "undated": 292
   },
-  "totals": {
+  "verified": {
     "articles": 5815,
     "images": 12611,
     "yes": 4063,
