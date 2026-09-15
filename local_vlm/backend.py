@@ -213,6 +213,39 @@ class LocalVLM:
                 trimmed, skip_special_tokens=True
             ).strip()
 
+    def generate_text(self, prompt: str, max_new_tokens: int | None = None) -> str:
+        """Text-only completion from the same loaded weights.
+
+        Qwen3.5-27B is multimodal, not vision-only, so a text task (judging a
+        caption, say) needs no second model and no second 52 GB on disk. The
+        message simply carries no image part. Thinking stays OFF for the same
+        reason it does for images -- see THINK_BLOCK_RE -- so a caller parsing
+        structured output still strips think blocks before reading it.
+        """
+        import torch
+
+        self.load()
+        messages = [{"role": "user", "content": [{"type": "text", "text": prompt}]}]
+        with self._gpu_lock:
+            inputs = self._processor.apply_chat_template(
+                messages,
+                add_generation_prompt=True,
+                tokenize=True,
+                return_dict=True,
+                return_tensors="pt",
+                enable_thinking=self.enable_thinking,
+            ).to(self._model.device)
+            with torch.inference_mode():
+                generated = self._model.generate(
+                    **inputs,
+                    max_new_tokens=max_new_tokens or self.max_new_tokens,
+                    do_sample=False,
+                )
+            trimmed = generated[0][inputs["input_ids"].shape[1]:]
+            return self._processor.decode(
+                trimmed, skip_special_tokens=True
+            ).strip()
+
     def classify(
         self,
         image_url: str,
