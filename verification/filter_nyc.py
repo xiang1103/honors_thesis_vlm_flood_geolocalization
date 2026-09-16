@@ -6,6 +6,8 @@ use rule-based to find article mentioning nyc, then llm to verify nyc based off 
 from __future__ import annotations
 
 import argparse
+import contextlib
+import fcntl
 import json
 import os
 import re
@@ -260,24 +262,41 @@ def read_corpus(path: Path) -> dict[str, dict[str, Any]]:
     return {a["url"]: a for a in payload if a.get("url")}
 
 
-def read_existing(path: Path) -> dict[str, dict[str, Any]]:
+def read_existing(path: Path, history_path: Path) -> dict[str, dict[str, Any]]:
     """Rows already judged, keyed by occurrence_id -- this run's resume ledger.
+
+    Reads the canonical JSON and then the intermediate JSONL, later wins. The
+    JSONL matters because it is only merged when a run FINISHES: a run killed
+    partway leaves its judgements there and nowhere else, and CLAUDE.md is
+    explicit that a `.jsonl` left in scrape_data/ is unmerged work, not
+    garbage. Skipping it would silently re-pay the GPU for every row the killed
+    run had already judged.
 
     Resume is prompt-agnostic, matching verify_images_vlm.py: editing
     JUDGE_PROMPT does not re-judge rows that already have a label. Every row
     records the exact `nyc_prompt` and `nyc_model` behind it, so a mixed file
-    stays legible. To re-judge everything, move the output file aside.
+    stays legible. To re-judge everything, move both files aside.
     """
-    if not path.exists():
-        return {}
-    with path.open("r", encoding="utf-8") as handle:
-        payload = json.load(handle)
-    results = payload.get("results", []) if isinstance(payload, dict) else []
-    return {
-        str(r["occurrence_id"]): r
-        for r in results
-        if r.get("occurrence_id") and r.get("nyc_status") == "completed"
-    }
+    known: dict[str, dict[str, Any]] = {}
+    if path.exists():
+        with path.open("r", encoding="utf-8") as handle:
+            payload = json.load(handle)
+        for row in (payload.get("results", []) if isinstance(payload, dict) else []):
+            if row.get("occurrence_id") and row.get("nyc_status") == "completed":
+                known[str(row["occurrence_id"])] = row
+    if history_path.exists():
+        with history_path.open("r", encoding="utf-8") as handle:
+            for line in handle:
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    row = json.loads(line)
+                except json.JSONDecodeError:
+                    continue      # a run killed mid-write leaves a torn last line
+                if row.get("occurrence_id") and row.get("nyc_status") == "completed":
+                    known[str(row["occurrence_id"])] = row
+    return known
 
 
 def write_output(
@@ -400,6 +419,39 @@ def parse_args() -> argparse.Namespace:
     return parser.parse_args()
 
 
+@contextlib.contextmanager
+def exclusive_run(final_path: Path):
+    """Refuse to start while another run holds the same output files.
+
+    Two concurrent runs corrupt each other in a way neither can detect. The
+    real incident: a run thought to be dead was still going, a second started,
+    read the JSONL as it stood and judged the rest -- then the first finished,
+    merged, and DELETED the JSONL while the second still had it open. The
+    second's work went to an unlinked inode, its merge found no history file,
+    and it overwrote the first's complete output with its own stale copy. Both
+    runs reported success.
+
+    flock is released by the kernel when the process dies however it dies, so
+    a crashed run leaves no stale lock to clear by hand.
+    """
+    lock_path = final_path.with_name(final_path.name + ".lock")
+    lock_path.parent.mkdir(parents=True, exist_ok=True)
+    handle = lock_path.open("w")
+    try:
+        try:
+            fcntl.flock(handle.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except OSError:
+            raise SystemExit(
+                f"Another run already holds {lock_path}. Wait for it to finish, "
+                f"or kill it first -- two runs would overwrite each other's results."
+            )
+        handle.write(f"{os.getpid()}\n")
+        handle.flush()
+        yield
+    finally:
+        handle.close()
+
+
 def main() -> int:
     args = parse_args()
 
@@ -453,7 +505,12 @@ def main() -> int:
         return 0
 
     # -- stage 2 ----------------------------------------------------------
-    known = read_existing(args.final_output)
+    # Held until the merge lands: reading the ledger, judging, and replacing the
+    # output must be one critical section or a second run interleaves with it.
+    lock = exclusive_run(args.final_output)
+    lock.__enter__()
+
+    known = read_existing(args.final_output, args.output)
     pending = [c for c in candidates if c["occurrence_id"] not in known]
     done = len(candidates) - len(pending)
     if args.limit is not None and args.limit < len(pending):
@@ -529,12 +586,15 @@ def main() -> int:
                 if index % 25 == 0 or index == len(pending):
                     print(f"  {index}/{len(pending)}  {counts}")
 
-    summary = write_output(args.final_output, args.output, candidates, known)
-    if not args.keep_jsonl and args.output.exists():
-        try:
-            args.output.unlink()
-        except OSError as exc:
-            print(f"Warning: could not remove {args.output}: {exc}", file=sys.stderr)
+    try:
+        summary = write_output(args.final_output, args.output, candidates, known)
+        if not args.keep_jsonl and args.output.exists():
+            try:
+                args.output.unlink()
+            except OSError as exc:
+                print(f"Warning: could not remove {args.output}: {exc}", file=sys.stderr)
+    finally:
+        lock.__exit__(None, None, None)
 
     print(f"\nWrote {args.final_output}")
     print(json.dumps(summary, indent=2))
