@@ -6,9 +6,19 @@ const PAGE_SIZE = 24;
 // format is versioned and every read is checked against the scheme the server
 // says it is currently emitting. A future id change then surfaces as a visible
 // banner and a migration, never as a review list that silently reads empty.
+//
+// The merge of the two review sites deliberately did NOT touch these: the keys
+// and the scheme are the same strings the labelling page always used, so every
+// decision saved before the merge is still found after it.
 const LEGACY_STORAGE_KEY = "vlm-flood-image-reviews-v1";
 const STORAGE_KEY = "vlm-flood-image-reviews-v2";
 const EXPECTED_SCHEME = "human_review_v2";
+
+const REVIEW_CHOICES = [
+  ["useful", "1 · Useful"],
+  ["reject", "2 · Reject"],
+  ["unsure", "3 · Unsure"],
+];
 
 // Set by loadReviews(), which runs while `state` is still being constructed
 // and therefore cannot write to it.
@@ -20,20 +30,60 @@ const state = {
   filtered: [],
   summary: null,
   reviews: loadReviews(),
+  answer: "yes",
   page: 1,
+  viewerIndex: -1,
 };
 
 const ui = {
   summary: document.querySelector("#summary"),
+  totalCount: document.querySelector("#totalCount"),
+  yesCount: document.querySelector("#yesCount"),
+  noCount: document.querySelector("#noCount"),
+  reviewedCount: document.querySelector("#reviewedCount"),
+  allButtonCount: document.querySelector("#allButtonCount"),
+  yesButtonCount: document.querySelector("#yesButtonCount"),
+  noButtonCount: document.querySelector("#noButtonCount"),
+  answerButtons: [...document.querySelectorAll("[data-answer]")],
+  search: document.querySelector("#search"),
   outlet: document.querySelector("#outlet"),
+  nyc: document.querySelector("#nyc"),
+  reviewState: document.querySelector("#reviewState"),
+  verification: document.querySelector("#verification"),
+  sortOrder: document.querySelector("#sortOrder"),
   exportReviews: document.querySelector("#exportReviews"),
   resultCount: document.querySelector("#resultCount"),
   pageStatus: document.querySelector("#pageStatus"),
+  paginationStatus: document.querySelector("#paginationStatus"),
   previousPage: document.querySelector("#previousPage"),
   nextPage: document.querySelector("#nextPage"),
   grid: document.querySelector("#imageGrid"),
   empty: document.querySelector("#emptyState"),
+  viewer: document.querySelector("#viewer"),
+  closeViewer: document.querySelector("#closeViewer"),
+  viewerImage: document.querySelector("#viewerImage"),
+  viewerFallback: document.querySelector("#viewerFallback"),
+  viewerPosition: document.querySelector("#viewerPosition"),
+  viewerBadges: document.querySelector("#viewerBadges"),
+  viewerTitle: document.querySelector("#viewerTitle"),
+  viewerCaption: document.querySelector("#viewerCaption"),
+  viewerReview: document.querySelector("#viewerReview"),
+  viewerModelOutput: document.querySelector("#viewerModelOutput"),
+  viewerMetadata: document.querySelector("#viewerMetadata"),
+  viewerArticleLink: document.querySelector("#viewerArticleLink"),
+  viewerImageLink: document.querySelector("#viewerImageLink"),
+  previousImage: document.querySelector("#previousImage"),
+  nextImage: document.querySelector("#nextImage"),
 };
+
+function node(tag, className = "", text = "") {
+  const element = document.createElement(tag);
+  if (className) element.className = className;
+  if (text) element.textContent = text;
+  return element;
+}
+
+// -- stored decisions -------------------------------------------------------
 
 function loadReviews() {
   try {
@@ -91,7 +141,7 @@ function migrateLegacyReviews(items) {
   for (const legacyId of legacyIds) {
     const item = byLegacyId.get(legacyId);
     if (!item) {
-      orphaned += 1;                      // image no longer in data/outlets
+      orphaned += 1;                      // image no longer in the dataset
       continue;
     }
     if (!state.reviews[item.id]) {
@@ -109,31 +159,25 @@ function showNotice(text, tone = "info") {
   document.querySelector("main").prepend(banner);
 }
 
-function node(tag, className = "", text = "") {
-  const element = document.createElement(tag);
-  if (className) element.className = className;
-  if (text) element.textContent = text;
-  return element;
-}
-
-function addBadge(parent, text, className = "") {
-  parent.append(node("span", `badge ${className}`.trim(), text));
+function setReview(item, value) {
+  if (state.reviews[item.id] === value) delete state.reviews[item.id];
+  else state.reviews[item.id] = value;
+  saveReviews();
+  renderSummary();
+  renderGrid();
+  if (ui.viewer.open) renderViewerReview();
 }
 
 function reviewButtons(item, compact = false) {
   const container = node("div", "review-buttons");
-  const choices = [
-    ["useful", compact ? "Useful" : "1 · Useful"],
-    ["reject", compact ? "Reject" : "2 · Reject"],
-    ["unsure", compact ? "Unsure" : "3 · Unsure"],
-  ];
-  for (const [value, label] of choices) {
-    const button = node("button", "", label);
+  for (const [value, label] of REVIEW_CHOICES) {
+    const button = node("button", "", compact ? label.split(" · ")[1] : label);
     button.type = "button";
     button.dataset.value = value;
     button.setAttribute("aria-pressed", String(state.reviews[item.id] === value));
     button.addEventListener("click", (event) => {
       event.stopPropagation();
+      event.preventDefault();
       setReview(item, value);
     });
     container.append(button);
@@ -141,23 +185,49 @@ function reviewButtons(item, compact = false) {
   return container;
 }
 
-function setReview(item, value) {
-  if (state.reviews[item.id] === value) delete state.reviews[item.id];
-  else state.reviews[item.id] = value;
-  saveReviews();
-  renderSummary();
-  renderGrid();
+// -- cards ------------------------------------------------------------------
+
+function addBadge(parent, text, className = "") {
+  parent.append(node("span", `badge ${className}`.trim(), text));
 }
 
 function badgesFor(item) {
   const badges = node("div", "badges");
-  // Only what varies between cards. Every image here is already from a
-  // flood-verified article, already judged street-view by the model, and
-  // already unique by URL -- badges for those said the same thing on every
-  // card, which is noise rather than information.
+  addBadge(badges, item.model_answer.toUpperCase(), item.model_answer);
   addBadge(badges, item.outlet.toUpperCase(), "outlet");
-  if (state.reviews[item.id]) addBadge(badges, `review: ${state.reviews[item.id]}`);
+  if (item.nyc_label === "nyc") {
+    addBadge(badges, item.nyc_place || "NEW YORK CITY", "nyc");
+  } else if (item.nyc_label === "nyc_metro_not_nyc") {
+    addBadge(badges, item.nyc_place || "NYC METRO", "nyc-metro");
+  }
+  if (!item.article_flood_verified) addBadge(badges, "article unverified", "warning");
+  if (item.duplicate_count > 1) addBadge(badges, `${item.duplicate_count}× repeated URL`, "warning");
+  const decision = state.reviews[item.id];
+  if (decision) addBadge(badges, `review: ${decision}`, `review-${decision}`);
   return badges;
+}
+
+function imageSurface(item, onOpen) {
+  const button = node("button", "image-button");
+  button.type = "button";
+  button.setAttribute("aria-label", `Open image: ${item.caption || item.article_title}`);
+  const image = node("img");
+  image.src = item.image_url;
+  image.alt = item.caption || `News image from ${item.article_title}`;
+  image.loading = "lazy";
+  image.decoding = "async";
+  image.referrerPolicy = "no-referrer";
+  const fallback = node("div", "image-fallback");
+  fallback.hidden = true;
+  fallback.append(node("strong", "", "Image could not be loaded"));
+  fallback.append(node("span", "", "Open it from the detailed view."));
+  image.addEventListener("error", () => {
+    image.hidden = true;
+    fallback.hidden = false;
+  }, { once: true });
+  button.append(image, fallback);
+  button.addEventListener("click", onOpen);
+  return button;
 }
 
 function articleLink(item, className, text) {
@@ -171,29 +241,10 @@ function articleLink(item, className, text) {
   return link;
 }
 
-function imageSurface(item) {
-  const figure = articleLink(item, "image-button");
-  const image = node("img");
-  image.src = item.image_url;
-  image.alt = item.caption || `News image from ${item.article_title}`;
-  image.loading = "lazy";
-  image.decoding = "async";
-  image.referrerPolicy = "no-referrer";
-  const fallback = node("div", "image-fallback");
-  fallback.hidden = true;
-  fallback.append(node("strong", "", "Image could not be loaded"));
-  fallback.append(node("span", "", "Open the original image link to inspect it."));
-  image.addEventListener("error", () => {
-    image.hidden = true;
-    fallback.hidden = false;
-  }, { once: true });
-  figure.append(image, fallback);
-  return figure;
-}
-
 function renderCard(item, index) {
-  const card = node("article", "image-card");
-  card.append(imageSurface(item));
+  const card = node("article", `image-card result-${item.model_answer}`);
+  if (state.reviews[item.id]) card.classList.add(`reviewed-${state.reviews[item.id]}`);
+  card.append(imageSurface(item, () => openViewer(index)));
   const body = node("div", "card-body");
   body.append(badgesFor(item));
   const heading = node("h2", "card-title");
@@ -205,22 +256,78 @@ function renderCard(item, index) {
   return card;
 }
 
-function filteredItems() {
-  // Outlet is the only filter left. The server sends `yes` images only, so
-  // there is nothing here to narrow by verdict.
-  return state.items.filter(
-    (item) => ui.outlet.value === "all" || item.outlet === ui.outlet.value,
-  );
+// -- filtering --------------------------------------------------------------
+
+// "" means the image is not in the New York set at all -- either judged
+// somewhere else or never a candidate. The two are indistinguishable from
+// here, so "Outside New York" reads as "not in the New York set", not as a
+// positive verdict of elsewhere.
+function matchesNyc(item, mode) {
+  if (mode === "all") return true;
+  if (mode === "nyc") return item.nyc_label === "nyc";
+  if (mode === "metro") return item.nyc_label === "nyc_metro_not_nyc";
+  if (mode === "any") return Boolean(item.nyc_label);
+  if (mode === "none") return !item.nyc_label;
+  return true;
 }
 
+function matchesReviewState(item, mode) {
+  const decision = state.reviews[item.id];
+  if (mode === "all") return true;
+  if (mode === "reviewed") return Boolean(decision);
+  if (mode === "unreviewed") return !decision;
+  return decision === mode;
+}
+
+function sortItems(items) {
+  const order = ui.sortOrder.value;
+  return items.sort((a, b) => {
+    if (order === "oldest") return a.article_date.localeCompare(b.article_date);
+    if (order === "outlet") return a.outlet.localeCompare(b.outlet) || b.article_date.localeCompare(a.article_date);
+    return b.article_date.localeCompare(a.article_date);
+  });
+}
+
+function filteredItems() {
+  const query = ui.search.value.trim().toLocaleLowerCase();
+  const matches = state.items.filter((item) => {
+    if (state.answer !== "all" && item.model_answer !== state.answer) return false;
+    if (ui.outlet.value !== "all" && item.outlet !== ui.outlet.value) return false;
+    if (!matchesNyc(item, ui.nyc.value)) return false;
+    if (!matchesReviewState(item, ui.reviewState.value)) return false;
+    if (ui.verification.value === "verified" && !item.article_flood_verified) return false;
+    if (ui.verification.value === "unverified" && item.article_flood_verified) return false;
+    const text = `${item.article_title} ${item.caption} ${item.model_output} ${item.outlet} ${item.nyc_place}`.toLocaleLowerCase();
+    return !query || text.includes(query);
+  });
+  return sortItems(matches);
+}
+
+// -- rendering --------------------------------------------------------------
+
 function renderSummary() {
-  if (!state.summary) return;
-  const reviewed = Object.keys(state.reviews).length;
   const s = state.summary;
+  if (!s) return;
+  const reviewed = Object.keys(state.reviews).length;
+  ui.totalCount.textContent = s.images.toLocaleString();
+  ui.yesCount.textContent = s.model_yes.toLocaleString();
+  ui.noCount.textContent = s.model_no.toLocaleString();
+  ui.reviewedCount.textContent = reviewed.toLocaleString();
+  ui.allButtonCount.textContent = s.images.toLocaleString();
+  ui.yesButtonCount.textContent = s.model_yes.toLocaleString();
+  ui.noButtonCount.textContent = s.model_no.toLocaleString();
+  const nycNote = s.nyc_available
+    ? ` ${s.nyc.toLocaleString()} labelled New York City, ${s.nyc_metro.toLocaleString()} NYC metro.`
+    : "";
   ui.summary.textContent =
-    `${s.images.toLocaleString()} verified images · `
-    + `${s.articles.toLocaleString()} articles · `
-    + `${reviewed.toLocaleString()} reviewed`;
+    `${s.unique_images.toLocaleString()} distinct images across ${s.articles.toLocaleString()} `
+    + `articles and ${s.outlets.length} outlets.${nycNote}`;
+  // Without the labels every image reads as "not New York", which would look
+  // like a finding rather than a missing file. Disable the control instead.
+  ui.nyc.disabled = !s.nyc_available;
+  ui.nyc.title = s.nyc_available
+    ? ""
+    : "Run verification/filter_nyc.py to enable the New York filter.";
 }
 
 function renderGrid() {
@@ -231,10 +338,86 @@ function renderGrid() {
   const pageItems = state.filtered.slice(start, start + PAGE_SIZE);
   ui.grid.replaceChildren(...pageItems.map((item, offset) => renderCard(item, start + offset)));
   ui.empty.hidden = pageItems.length > 0;
-  ui.resultCount.textContent = `${state.filtered.length.toLocaleString()} matching images · showing ${pageItems.length ? start + 1 : 0}–${Math.min(start + PAGE_SIZE, state.filtered.length)}`;
+
+  const label = state.answer === "all" ? "images" : `${state.answer.toUpperCase()} images`;
+  const first = pageItems.length ? start + 1 : 0;
+  const last = Math.min(start + PAGE_SIZE, state.filtered.length);
+  ui.resultCount.textContent = `${state.filtered.length.toLocaleString()} matching ${label} · showing ${first}–${last}`;
   ui.pageStatus.textContent = `Page ${state.page} of ${pageCount}`;
+  ui.paginationStatus.textContent = `${state.page} / ${pageCount}`;
   ui.previousPage.disabled = state.page <= 1;
   ui.nextPage.disabled = state.page >= pageCount;
+}
+
+function metadataRow(term, detail) {
+  const fragment = document.createDocumentFragment();
+  fragment.append(node("dt", "", term), node("dd", "", detail));
+  return fragment;
+}
+
+function formatScore(value) {
+  const number = Number(value);
+  return Number.isFinite(number) ? number.toFixed(3) : "—";
+}
+
+function openViewer(index) {
+  state.viewerIndex = index;
+  renderViewer();
+  ui.viewer.showModal();
+}
+
+function renderViewerReview() {
+  const item = state.filtered[state.viewerIndex];
+  if (!item) return;
+  ui.viewerReview.replaceChildren(reviewButtons(item));
+  ui.viewerBadges.replaceChildren(...badgesFor(item).childNodes);
+}
+
+function renderViewer() {
+  const item = state.filtered[state.viewerIndex];
+  if (!item) return;
+  ui.viewerImage.hidden = false;
+  ui.viewerFallback.hidden = true;
+  ui.viewerImage.src = item.image_url;
+  ui.viewerImage.alt = item.caption || `News image from ${item.article_title}`;
+  ui.viewerImage.referrerPolicy = "no-referrer";
+  ui.viewerImage.onerror = () => {
+    ui.viewerImage.hidden = true;
+    ui.viewerFallback.hidden = false;
+  };
+  ui.viewerPosition.textContent = `${state.viewerIndex + 1} / ${state.filtered.length}`;
+  ui.viewerTitle.textContent = item.article_title;
+  ui.viewerCaption.textContent = item.caption || "No caption available.";
+  ui.viewerModelOutput.textContent = item.model_output || item.model_answer;
+  renderViewerReview();
+  ui.viewerMetadata.replaceChildren(
+    metadataRow("Outlet", item.outlet.toUpperCase()),
+    metadataRow("Article date", item.article_date || "Unknown"),
+    metadataRow("Article flood score", formatScore(item.article_flood_score)),
+    metadataRow("Image position", String(item.image_index)),
+    metadataRow("Markup source", item.image_source),
+    metadataRow("Model", item.model || "Unknown"),
+    metadataRow("Attempts", String(item.attempts)),
+    ...(item.nyc_label
+      ? [
+          metadataRow("New York verdict", `${item.nyc_label} (${item.nyc_confidence})`),
+          metadataRow("Place", item.nyc_place || "Unspecified"),
+          metadataRow("Evidence", item.nyc_evidence || "—"),
+        ]
+      : []),
+  );
+  ui.viewerArticleLink.href = item.article_url || "#";
+  ui.viewerArticleLink.hidden = !item.article_url;
+  ui.viewerImageLink.href = item.image_url;
+  ui.previousImage.disabled = state.viewerIndex <= 0;
+  ui.nextImage.disabled = state.viewerIndex >= state.filtered.length - 1;
+}
+
+function moveViewer(delta) {
+  const next = state.viewerIndex + delta;
+  if (next < 0 || next >= state.filtered.length) return;
+  state.viewerIndex = next;
+  renderViewer();
 }
 
 function exportReviews() {
@@ -244,12 +427,16 @@ function exportReviews() {
       review: state.reviews[item.id],
       id: item.id,
       id_scheme: EXPECTED_SCHEME,
+      occurrence_id: item.occurrence_id,
       outlet: item.outlet,
       article_title: item.article_title,
       article_date: item.article_date,
       article_url: item.article_url,
       image_url: item.image_url,
       caption: item.caption,
+      model_answer: item.model_answer,
+      nyc_label: item.nyc_label,
+      nyc_place: item.nyc_place,
     }));
   const blob = new Blob([JSON.stringify(selected, null, 2)], { type: "application/json" });
   const url = URL.createObjectURL(blob);
@@ -260,13 +447,66 @@ function exportReviews() {
   URL.revokeObjectURL(url);
 }
 
-ui.outlet.addEventListener("change", () => {
-  state.page = 1;
-  renderGrid();
+// -- wiring -----------------------------------------------------------------
+
+function setAnswer(value) {
+  state.answer = value;
+  for (const button of ui.answerButtons) {
+    const active = button.dataset.answer === value;
+    button.classList.toggle("active", active);
+    button.setAttribute("aria-pressed", String(active));
+  }
+}
+
+ui.answerButtons.forEach((button) => {
+  button.addEventListener("click", () => {
+    setAnswer(button.dataset.answer);
+    state.page = 1;
+    renderGrid();
+  });
 });
-ui.previousPage.addEventListener("click", () => { state.page -= 1; renderGrid(); window.scrollTo({ top: 0, behavior: "smooth" }); });
-ui.nextPage.addEventListener("click", () => { state.page += 1; renderGrid(); window.scrollTo({ top: 0, behavior: "smooth" }); });
+
+for (const control of [ui.search, ui.outlet, ui.nyc, ui.reviewState, ui.verification, ui.sortOrder]) {
+  control.addEventListener(control === ui.search ? "input" : "change", () => {
+    state.page = 1;
+    renderGrid();
+  });
+}
+
+ui.previousPage.addEventListener("click", () => {
+  state.page -= 1;
+  renderGrid();
+  window.scrollTo({ top: 0, behavior: "smooth" });
+});
+ui.nextPage.addEventListener("click", () => {
+  state.page += 1;
+  renderGrid();
+  window.scrollTo({ top: 0, behavior: "smooth" });
+});
 ui.exportReviews.addEventListener("click", exportReviews);
+ui.closeViewer.addEventListener("click", () => ui.viewer.close());
+ui.previousImage.addEventListener("click", () => moveViewer(-1));
+ui.nextImage.addEventListener("click", () => moveViewer(1));
+ui.viewer.addEventListener("click", (event) => {
+  if (event.target === ui.viewer) ui.viewer.close();
+});
+document.addEventListener("keydown", (event) => {
+  if (!ui.viewer.open) return;
+  if (event.key === "ArrowLeft") moveViewer(-1);
+  if (event.key === "ArrowRight") moveViewer(1);
+  const choice = REVIEW_CHOICES[["1", "2", "3"].indexOf(event.key)];
+  if (choice) {
+    const item = state.filtered[state.viewerIndex];
+    // Re-renders the grid underneath, which rebuilds state.filtered. Only the
+    // review-status filter can drop this item from it, so guard the index.
+    if (item) {
+      setReview(item, choice[0]);
+      state.viewerIndex = Math.min(state.viewerIndex, state.filtered.length - 1);
+      if (state.viewerIndex < 0) ui.viewer.close();
+      else renderViewer();
+    }
+  }
+});
 
 fetch("/api/images")
   .then((response) => {
@@ -276,6 +516,7 @@ fetch("/api/images")
   .then((catalog) => {
     state.items = catalog.items;
     state.summary = catalog.summary;
+    setAnswer(catalog.default_answer || "yes");
 
     // The server is the authority on the current id scheme. Disagreement means
     // the ids were changed without migrating, so say so loudly rather than
@@ -308,7 +549,7 @@ fetch("/api/images")
         showNotice(
           `${result.orphaned} old review decision` +
           `${result.orphaned === 1 ? "" : "s"} did not match any image now in ` +
-          `data/outlets and could not be carried forward. They remain under ` +
+          `the dataset and could not be carried forward. They remain under ` +
           `"${LEGACY_STORAGE_KEY}".`,
           "warn",
         );

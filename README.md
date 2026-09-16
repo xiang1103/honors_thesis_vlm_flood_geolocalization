@@ -6,7 +6,9 @@ filter the images down to usable street-level photographs — by model and by ey
 ```
 scrape ──► data/news_scrape_results.json ──► VLM verify ──► data/verified_images_news.json
                     (the corpus)                                          │
-                          └──► review site :8765 (human)   :8766 (model) ◄┘
+                                       filter_nyc.py ──► nyc_scraped_images.json
+                                                                          │
+                          └──────────────► review site :8765 ◄────────────┘
 ```
 
 ```
@@ -65,14 +67,28 @@ python3 verification/verify_images_vlm.py --device-map cuda:0   # pin one GPU
 ``` 
 Alternative VLM model: gemma-4-31B-it 
 
-## 3. Review sites
+## 3. Review site
 
-Two separate local sites, each on its own port. Both can run at once.
+One local site. It was two -- human review on :8765 and model results on :8766 --
+which read the same file and showed the same images; they are merged.
 
 ```bash
-python3 image_review_server.py          # http://127.0.0.1:8765  — human review
-python3 image_vlm_review_server.py      # http://127.0.0.1:8766  — model results
+python3 image_review_server.py          # http://127.0.0.1:8765
 ```
+
+Each card carries the model's YES/NO verdict, the New York label, and your own
+decision. Filters: model answer, search, outlet, New York, your review status,
+article flood-check, and sort. Click an image for the full-size viewer, where
+1/2/3 record Useful/Reject/Unsure and the arrow keys move through the matches.
+"Export decisions" writes them to JSON.
+
+All rows load; the page opens on the model's `yes` images, which is the dataset
+itself. `--answer no` or `--answer all` opens elsewhere. New York labels come
+from `data/nyc_scraped_images.json` when it exists (`--nyc-file` to point
+elsewhere); without it the site runs with that one filter disabled.
+
+Review decisions live only in this browser's localStorage. There is no
+server-side copy -- export them before clearing site data.
 
 ## Good sites 
 or "street-view flooded, crowdsourced, with coordinates," Mapillary already is the social platform 
