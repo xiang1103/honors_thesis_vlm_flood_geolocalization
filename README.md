@@ -4,7 +4,7 @@ Collect flood news articles with captioned images from 29 news outlets, then
 filter the images down to usable street-level photographs — by model and by eye.
 
 ```
-scrape ──► data/news_scrape_results.json ──► VLM verify ──► data/verified_images_news.json
+scrape ──► data/news_scrape_results.json ──► Text matching to find flood news + VLM to verify which images are good ──► data/verified_images_news.json
                     (the corpus)                                          │
                                        filter_nyc.py ──► nyc_scraped_images.json
                                                                           │
@@ -100,6 +100,12 @@ or "street-view flooded, crowdsourced, with coordinates," Mapillary already is t
   labels, no coords), FloodNet (UAV imagery of post-Harvey flooding, georeferenced but aerial), and   
   Copernicus EMS (flood extents, satellite). None are street-level VPR datasets, but they'll tell you 
   what's been tried.
+
+
+## Future Designs 
+
+**Get Street Images:** 
+- if we can find out reports of where flood has happened, use Google Maps API to find the street-view image for that time 
 
 
 ## Limitations 

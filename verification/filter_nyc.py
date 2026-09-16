@@ -179,10 +179,13 @@ Rules:
 Reply with one JSON object and nothing else:
 {{"label": "nyc" or "nyc_metro_not_nyc" or "elsewhere" or "unknown", "confidence": "high" or "medium" or "low", "place": "the most specific place name you can justify, or an empty string", "evidence": "a short quote from the caption or article that decides it"}}"""
 
-#: How much article body the judge sees. The corpus median is 3.5k characters,
-#: so this truncates only the long features, and the caption -- which is what
-#: actually decides the answer -- is always shown in full above it.
-TEXT_BUDGET = 6000
+#: How much article body the judge sees. The caption -- always shown in full
+#: above it -- is what decides the answer; the article only disambiguates it,
+#: and a news lede establishes place in its first paragraph. Measured: cutting
+#: 6000 -> 1500 changed 2 of 243 verdicts (99.2% agreement) and left the kept
+#: set the same size, while nearly doubling throughput, because prefill over
+#: this model's linear-attention path dominates the run.
+TEXT_BUDGET = 1500
 
 THINK_BLOCK_RE = re.compile(r"<think>.*?</think>", re.DOTALL | re.IGNORECASE)
 UNTERMINATED_THINK_RE = re.compile(r"<think>.*\Z", re.DOTALL | re.IGNORECASE)
@@ -395,7 +398,7 @@ def parse_args() -> argparse.Namespace:
                         help="Local model weights (default: local_vlm.DEFAULT_MODEL_PATH).")
     parser.add_argument("--device-map", default="auto",
                         help="accelerate device_map: 'auto', 'cuda:0', ... Pin a free GPU.")
-    parser.add_argument("--batch-size", type=int, default=32,
+    parser.add_argument("--batch-size", type=int, default=64,
                         help="Captions judged per forward pass.")
     return parser.parse_args()
 
@@ -439,7 +442,7 @@ def main() -> int:
             llm = LocalVLM(
                 model_path,
                 device_map=args.device_map,
-                max_new_tokens=160,
+                max_new_tokens=128,
                 enable_thinking=False,   # see backend.THINK_BLOCK_RE
             )
             print(f"Loading {model_path} on device_map={args.device_map} ...")
