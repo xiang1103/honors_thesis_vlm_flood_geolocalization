@@ -246,6 +246,62 @@ class LocalVLM:
                 trimmed, skip_special_tokens=True
             ).strip()
 
+    def generate_text_batch(
+        self, prompts: list[str], max_new_tokens: int | None = None
+    ) -> list[str]:
+        """Text-only completions for several prompts in one forward pass.
+
+        One prompt at a time leaves the GPU almost idle: these replies are a
+        few dozen tokens each, so the run is dominated by per-call overhead
+        rather than compute. Batching is what makes a whole-corpus pass
+        practical (hours -> tens of minutes).
+
+        Padding must be on the LEFT. This is a decoder-only model, so
+        generation continues from the last position of each row; right-padding
+        would have it continue from PAD and emit nonsense for every sequence
+        except the longest.
+        """
+        import torch
+
+        if not prompts:
+            return []
+        self.load()
+        conversations = [
+            [{"role": "user", "content": [{"type": "text", "text": p}]}]
+            for p in prompts
+        ]
+        with self._gpu_lock:
+            tokenizer = getattr(self._processor, "tokenizer", self._processor)
+            previous_side = getattr(tokenizer, "padding_side", None)
+            tokenizer.padding_side = "left"
+            try:
+                inputs = self._processor.apply_chat_template(
+                    conversations,
+                    add_generation_prompt=True,
+                    tokenize=True,
+                    return_dict=True,
+                    return_tensors="pt",
+                    padding=True,
+                    enable_thinking=self.enable_thinking,
+                ).to(self._model.device)
+                with torch.inference_mode():
+                    generated = self._model.generate(
+                        **inputs,
+                        max_new_tokens=max_new_tokens or self.max_new_tokens,
+                        do_sample=False,
+                        pad_token_id=tokenizer.pad_token_id or tokenizer.eos_token_id,
+                    )
+            finally:
+                if previous_side is not None:
+                    tokenizer.padding_side = previous_side
+            # Left padding means every row's prompt ends at the same column, so
+            # one slice trims the echoed prompt from all of them.
+            width = inputs["input_ids"].shape[1]
+            return [
+                self._processor.decode(row[width:], skip_special_tokens=True).strip()
+                for row in generated
+            ]
+
     def classify(
         self,
         image_url: str,

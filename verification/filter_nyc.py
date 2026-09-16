@@ -1,17 +1,45 @@
-"""Find the New York City images inside data/verified_images_news.json.
+"""Find the New York images and articles in the classified flood dataset.
 
-use rule-based to find article mentioning nyc, then llm to verify nyc based off image captions 
+ONE pipeline, no modes. Every flood-related article in
+``data/verified_images_news.json`` is examined, and two independent checks run:
+
+* the ARTICLE is checked by RULE -- a New York gazetteer over its headline and
+  body (see STRONG_TERMS);
+* every IMAGE is checked by an LLM reading its own caption, with the article
+  supplied as context.
+
+Two checks rather than one because neither alone is right. A caption is the
+only thing that describes THIS photograph -- an article about New York City
+routinely carries pictures taken in Houston or Nepal, measured at 180 of 243 in
+an earlier pass. But a caption alone is not enough either: RNZ captions
+"Brooklyn residents clearing gutters" about a suburb of Wellington, and only
+the surrounding article says which Brooklyn it is.
+
+What is kept:
+
+* an image whose own LLM check passes -- and its article comes with it;
+* every image of an article whose rule check passes.
+
+So a New York article keeps its whole set, and a New York photograph is never
+lost just because its article was about somewhere else.
+
+Everything kept is written to ``data/nyc_scraped_images.json``, articles and
+images together.
+
+    python3 verification/filter_nyc.py --device-map cuda:0
 """
 
 from __future__ import annotations
 
 import argparse
+import collections
 import contextlib
 import fcntl
 import json
 import os
 import re
 import sys
+import time
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -240,6 +268,12 @@ def build_prompt(row: dict[str, Any], article: dict[str, Any]) -> str:
 # I/O
 # --------------------------------------------------------------------------
 
+#: An image is New York if the LLM puts it in the five boroughs, or in the
+#: surrounding metro area. The metro label is kept distinct rather than merged
+#: so a later decision to drop New Jersey is a filter, not another GPU run.
+KEEP_LABELS = ("nyc", "nyc_metro_not_nyc")
+
+
 def read_verified(path: Path) -> dict[str, Any]:
     with path.open("r", encoding="utf-8") as handle:
         payload = json.load(handle)
@@ -252,7 +286,7 @@ def read_corpus(path: Path) -> dict[str, dict[str, Any]]:
     """article_url -> article. Raises rather than returning an empty map.
 
     Same reason `scrape.finalize()` raises: an article lookup that silently
-    came back empty would send every image to the judge with no context and
+    came back empty would send every image to the LLM with no context and still
     look like a successful run.
     """
     with path.open("r", encoding="utf-8") as handle:
@@ -262,112 +296,40 @@ def read_corpus(path: Path) -> dict[str, dict[str, Any]]:
     return {a["url"]: a for a in payload if a.get("url")}
 
 
-def read_existing(path: Path, history_path: Path) -> dict[str, dict[str, Any]]:
-    """Rows already judged, keyed by occurrence_id -- this run's resume ledger.
+def read_ledger(path: Path) -> dict[str, dict[str, Any]]:
+    """Every image judged so far, keyed by occurrence_id.
 
-    Reads the canonical JSON and then the intermediate JSONL, later wins. The
-    JSONL matters because it is only merged when a run FINISHES: a run killed
-    partway leaves its judgements there and nowhere else, and CLAUDE.md is
-    explicit that a `.jsonl` left in scrape_data/ is unmerged work, not
-    garbage. Skipping it would silently re-pay the GPU for every row the killed
-    run had already judged.
-
-    Resume is prompt-agnostic, matching verify_images_vlm.py: editing
-    JUDGE_PROMPT does not re-judge rows that already have a label. Every row
-    records the exact `nyc_prompt` and `nyc_model` behind it, so a mixed file
-    stays legible. To re-judge everything, move both files aside.
+    The ledger is an INTERNAL file under scrape_data/, not the deliverable. It
+    exists because the deliverable holds only what passed: if resume read that
+    instead, every rejected image would read as pending and the whole corpus
+    would be re-judged on the next run -- an hour of GPU to rediscover the same
+    negatives. Nothing about it is a mode or a flag; it is always written and
+    always read.
     """
-    known: dict[str, dict[str, Any]] = {}
-    if path.exists():
+    if not path.exists():
+        return {}
+    try:
         with path.open("r", encoding="utf-8") as handle:
             payload = json.load(handle)
-        for row in (payload.get("results", []) if isinstance(payload, dict) else []):
-            if row.get("occurrence_id") and row.get("nyc_status") == "completed":
-                known[str(row["occurrence_id"])] = row
-    if history_path.exists():
-        with history_path.open("r", encoding="utf-8") as handle:
-            for line in handle:
-                line = line.strip()
-                if not line:
-                    continue
-                try:
-                    row = json.loads(line)
-                except json.JSONDecodeError:
-                    continue      # a run killed mid-write leaves a torn last line
-                if row.get("occurrence_id") and row.get("nyc_status") == "completed":
-                    known[str(row["occurrence_id"])] = row
-    return known
+    except (OSError, json.JSONDecodeError) as exc:
+        raise RuntimeError(
+            f"Could not read the judgement ledger {path}: {exc}. "
+            f"Move it aside to start over rather than deleting judgements."
+        ) from exc
+    return {
+        str(r["occurrence_id"]): r
+        for r in payload.get("results", [])
+        if r.get("occurrence_id") and r.get("nyc_status") == "completed"
+    }
 
 
-def write_output(
-    path: Path,
-    history_path: Path,
-    candidates: list[dict[str, Any]],
-    known: dict[str, dict[str, Any]],
-) -> dict[str, Any]:
-    """Merge this run's JSONL into the canonical JSON, atomically.
+def write_json(path: Path, payload: dict[str, Any]) -> None:
+    """Replace `path` atomically, fsynced before the rename.
 
-    MUST merge, not overwrite: `known` carries forward rows whose article has
-    since dropped out of the candidate set (a gazetteer edit, a narrower
-    --limit), which would otherwise be lost along with the GPU time they cost.
+    fsync because /home/liu47 is NFS and page-cache bytes are not durable
+    bytes; the partial .tmp is removed on failure so a botched write leaves the
+    previous file untouched rather than half-replaced.
     """
-    latest: dict[str, dict[str, Any]] = dict(known)
-    if history_path.exists():
-        with history_path.open("r", encoding="utf-8") as handle:
-            for line in handle:
-                line = line.strip()
-                if not line:
-                    continue
-                try:
-                    row = json.loads(line)
-                except json.JSONDecodeError:
-                    continue
-                if row.get("occurrence_id") and row.get("nyc_status") == "completed":
-                    latest[str(row["occurrence_id"])] = row
-
-    ordered: list[dict[str, Any]] = []
-    seen: set[str] = set()
-    for candidate in candidates:
-        oid = candidate["occurrence_id"]
-        if oid in latest and oid not in seen:
-            ordered.append(latest[oid])
-            seen.add(oid)
-    ordered.extend(row for oid, row in latest.items() if oid not in seen)
-
-    def count(field: str, value: str) -> int:
-        return sum(1 for r in ordered if r.get(field) == value)
-
-    nyc_rows = [r for r in ordered if r.get("nyc_label") == "nyc"]
-    summary = {
-        "candidate_occurrences": len(candidates),
-        "judged_occurrences": len(seen),
-        "pending_occurrences": len(candidates) - len(seen),
-        "carried_occurrences": len(ordered) - len(seen),
-        "stored_occurrences": len(ordered),
-        "candidate_articles": len({c["article_url"] for c in candidates}),
-        "by_label": {label: count("nyc_label", label) for label in LABELS},
-        "by_confidence": {c: count("nyc_confidence", c) for c in CONFIDENCES},
-        "by_rule_tier": {
-            tier: count("rule_tier", tier)
-            for tier in ("strong", "ambiguous+anchor", "anchor_only")
-        },
-        # The headline number: what a caller would actually take.
-        "nyc_images": len(nyc_rows),
-        "nyc_images_high_or_medium": sum(
-            1 for r in nyc_rows if r.get("nyc_confidence") in ("high", "medium")
-        ),
-        "nyc_articles": len({r["article_url"] for r in nyc_rows}),
-        "on_current_prompt": sum(r.get("nyc_prompt") == JUDGE_PROMPT for r in ordered),
-        "distinct_prompts": len({r.get("nyc_prompt") for r in ordered}),
-    }
-    payload = {
-        "summary": summary,
-        "rules_version": RULES_VERSION,
-        "current_prompt": JUDGE_PROMPT,
-        "prompt": JUDGE_PROMPT,
-        "labels": list(LABELS),
-        "results": ordered,
-    }
     path.parent.mkdir(parents=True, exist_ok=True)
     temporary = path.with_name(path.name + ".tmp")
     try:
@@ -380,61 +342,24 @@ def write_output(
     except Exception:
         temporary.unlink(missing_ok=True)
         raise
-    return summary
-
-
-def parse_args() -> argparse.Namespace:
-    root = Path(__file__).resolve().parents[1]
-    parser = argparse.ArgumentParser(
-        description="Label the New York City images in the verified-image results."
-    )
-    parser.add_argument("--verified", type=Path,
-                        default=root / "data" / "verified_images_news.json",
-                        help="Verifier output to read (default: data/verified_images_news.json).")
-    parser.add_argument("--corpus", type=Path,
-                        default=root / "data" / "news_scrape_results.json",
-                        help="Corpus supplying article text (default: data/news_scrape_results.json).")
-    parser.add_argument("--final-output", type=Path,
-                        default=root / "data" / "nyc_scraped_images.json",
-                        help="Canonical labelled output; also the resume ledger.")
-    parser.add_argument("--output", type=Path,
-                        default=root / "scrape_data" / "nyc_scraped_images.jsonl",
-                        help="Intermediate append-only JSONL, merged and deleted at the end.")
-    parser.add_argument("--keep-jsonl", action="store_true",
-                        help="Keep the intermediate JSONL after the merge.")
-    parser.add_argument("--answer", default="yes", choices=("yes", "no", "any"),
-                        help="Which verifier rows to consider (default: yes, the street-level ones).")
-    parser.add_argument("--rules-only", action="store_true",
-                        help="Run stage 1 and report candidates without loading the model.")
-    parser.add_argument("--model-path", default=None,
-                        help="Local model weights (default: local_vlm.DEFAULT_MODEL_PATH).")
-    parser.add_argument("--device-map", default="auto",
-                        help="accelerate device_map: 'auto', 'cuda:0', ... Pin a free GPU.")
-    parser.add_argument("--max-new-tokens", type=int, default=200,
-                        help="Generation cap for the JSON verdict.")
-    parser.add_argument("--retries", type=int, default=3,
-                        help="Attempts before a row is recorded as invalid_output.")
-    parser.add_argument("--limit", type=int, default=None,
-                        help="Judge at most this many images; for testing.")
-    return parser.parse_args()
 
 
 @contextlib.contextmanager
-def exclusive_run(final_path: Path):
+def exclusive_run(lock_target: Path):
     """Refuse to start while another run holds the same output files.
 
     Two concurrent runs corrupt each other in a way neither can detect. The
     real incident: a run thought to be dead was still going, a second started,
-    read the JSONL as it stood and judged the rest -- then the first finished,
-    merged, and DELETED the JSONL while the second still had it open. The
-    second's work went to an unlinked inode, its merge found no history file,
-    and it overwrote the first's complete output with its own stale copy. Both
-    runs reported success.
+    read the ledger as it stood and judged the rest -- then the first finished,
+    merged, and DELETED the intermediate while the second still had it open.
+    The second's work went to an unlinked inode, its merge found no history
+    file, and it overwrote the first's complete output with its own stale copy.
+    Both runs reported success.
 
     flock is released by the kernel when the process dies however it dies, so
     a crashed run leaves no stale lock to clear by hand.
     """
-    lock_path = final_path.with_name(final_path.name + ".lock")
+    lock_path = lock_target.with_name(lock_target.name + ".lock")
     lock_path.parent.mkdir(parents=True, exist_ok=True)
     handle = lock_path.open("w")
     try:
@@ -452,153 +377,210 @@ def exclusive_run(final_path: Path):
         handle.close()
 
 
+def parse_args() -> argparse.Namespace:
+    root = Path(__file__).resolve().parents[1]
+    parser = argparse.ArgumentParser(
+        description="Keep the New York images and articles in the flood dataset."
+    )
+    parser.add_argument("--verified", type=Path,
+                        default=root / "data" / "verified_images_news.json",
+                        help="Classified dataset to read.")
+    parser.add_argument("--corpus", type=Path,
+                        default=root / "data" / "news_scrape_results.json",
+                        help="Corpus supplying article text.")
+    parser.add_argument("--output", type=Path,
+                        default=root / "data" / "nyc_scraped_images.json",
+                        help="The deliverable: the New York articles and images.")
+    parser.add_argument("--model-path", default=None,
+                        help="Local model weights (default: local_vlm.DEFAULT_MODEL_PATH).")
+    parser.add_argument("--device-map", default="auto",
+                        help="accelerate device_map: 'auto', 'cuda:0', ... Pin a free GPU.")
+    parser.add_argument("--batch-size", type=int, default=32,
+                        help="Captions judged per forward pass.")
+    return parser.parse_args()
+
+
 def main() -> int:
     args = parse_args()
+    ledger_path = (Path(__file__).resolve().parents[1]
+                   / "scrape_data" / "nyc_judgements.json")
+    history_path = ledger_path.with_suffix(".jsonl")
 
     verified = read_verified(args.verified)
     corpus = read_corpus(args.corpus)
+    rows = [r for r in verified["results"] if r.get("article_url") in corpus]
+    skipped = len(verified["results"]) - len(rows)
+    print(f"Flood-related images: {len(rows)} across "
+          f"{len({r['article_url'] for r in rows})} articles"
+          + (f"  ({skipped} rows had no corpus article)" if skipped else ""))
 
-    rows = verified["results"]
-    if args.answer != "any":
-        rows = [r for r in rows if r.get("answer") == args.answer]
-    print(f"Verifier rows considered: {len(rows)} (answer={args.answer})")
-
-    # -- stage 1 ----------------------------------------------------------
-    article_rules: dict[str, dict[str, Any] | None] = {}
-    candidates: list[dict[str, Any]] = []
-    missing_articles = 0
-    for row in rows:
-        url = row.get("article_url")
-        article = corpus.get(url)
-        if article is None:
-            missing_articles += 1
-            continue
-        if url not in article_rules:
-            article_rules[url] = classify_article(
-                article.get("title") or "", article.get("text") or ""
-            )
-        rules = article_rules[url]
-        if rules is None:
-            continue
-        caption = row.get("caption") or ""
-        candidates.append({
-            **row,
-            **rules,
-            # Recorded separately because a place named in the caption is far
-            # stronger evidence than the same name buried in the body.
-            "rule_caption_terms": matched_terms(STRONG_RE + AMBIGUOUS_RE, caption),
-        })
-
-    tiers: dict[str, int] = {}
-    for c in candidates:
-        tiers[c["rule_tier"]] = tiers.get(c["rule_tier"], 0) + 1
-    print(f"Stage 1: {len(candidates)} candidate images across "
-          f"{len({c['article_url'] for c in candidates})} articles  {tiers}")
-    if missing_articles:
-        print(f"  ({missing_articles} rows had no matching corpus article)")
-
-    if args.rules_only:
-        print("--rules-only: stopping before the model.")
-        return 0
-    if not candidates:
-        print("Nothing to judge.")
-        return 0
-
-    # -- stage 2 ----------------------------------------------------------
-    # Held until the merge lands: reading the ledger, judging, and replacing the
-    # output must be one critical section or a second run interleaves with it.
-    lock = exclusive_run(args.final_output)
-    lock.__enter__()
-
-    known = read_existing(args.final_output, args.output)
-    pending = [c for c in candidates if c["occurrence_id"] not in known]
-    done = len(candidates) - len(pending)
-    if args.limit is not None and args.limit < len(pending):
-        deferred = len(pending) - args.limit
-        pending = pending[:args.limit]
-    else:
-        deferred = 0
-    print(f"Stage 2: {len(pending)} to judge, {done} already judged"
-          + (f", {deferred} deferred by --limit" if deferred else ""))
-
-    if pending:
-        sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-        from local_vlm import DEFAULT_MODEL_PATH, LocalVLM
-
-        model_path = args.model_path or DEFAULT_MODEL_PATH
-        llm = LocalVLM(
-            model_path,
-            device_map=args.device_map,
-            max_new_tokens=args.max_new_tokens,
-            enable_thinking=False,   # see backend.THINK_BLOCK_RE
+    # -- the rule check, on articles --------------------------------------
+    article_rules: dict[str, dict[str, Any]] = {}
+    for url in {r["article_url"] for r in rows}:
+        article = corpus[url]
+        article_rules[url] = classify_article(
+            article.get("title") or "", article.get("text") or ""
         )
-        print(f"Loading {model_path} on device_map={args.device_map} ...")
-        llm.load()
-        print("Loaded.")
+    rule_pass = {u for u, v in article_rules.items() if v is not None}
+    print(f"Rule check: {len(rule_pass)} articles mention New York")
 
-        args.output.parent.mkdir(parents=True, exist_ok=True)
-        # The same caption under the same article is the same question; a few
-        # outlets repeat one caption across an article's images.
-        prompt_cache: dict[str, dict[str, Any]] = {}
-        counts: dict[str, int] = {}
-        with args.output.open("a", encoding="utf-8") as history:
-            for index, candidate in enumerate(pending, start=1):
-                article = corpus[candidate["article_url"]]
-                prompt = build_prompt(candidate, article)
+    # -- the LLM check, on every image ------------------------------------
+    with exclusive_run(ledger_path):
+        ledger = read_ledger(ledger_path)
+        pending = [r for r in rows if r["occurrence_id"] not in ledger]
+        print(f"LLM check: {len(pending)} captions to judge, "
+              f"{len(rows) - len(pending)} already judged")
 
-                judgement = prompt_cache.get(prompt)
-                output = ""
-                if judgement is None:
-                    for attempt in range(1, args.retries + 1):
-                        try:
-                            output = llm.generate_text(prompt)
-                        except Exception as exc:  # noqa: BLE001
-                            output = f"{type(exc).__name__}: {exc}"
-                            continue
+        if pending:
+            sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+            from local_vlm import DEFAULT_MODEL_PATH, LocalVLM
+
+            model_path = args.model_path or DEFAULT_MODEL_PATH
+            llm = LocalVLM(
+                model_path,
+                device_map=args.device_map,
+                max_new_tokens=160,
+                enable_thinking=False,   # see backend.THINK_BLOCK_RE
+            )
+            print(f"Loading {model_path} on device_map={args.device_map} ...")
+            llm.load()
+            print("Loaded.")
+
+            history_path.parent.mkdir(parents=True, exist_ok=True)
+            counts: dict[str, int] = {}
+            started = time.monotonic()
+            with history_path.open("a", encoding="utf-8") as history:
+                for offset in range(0, len(pending), args.batch_size):
+                    chunk = pending[offset:offset + args.batch_size]
+                    prompts = [build_prompt(r, corpus[r["article_url"]]) for r in chunk]
+                    try:
+                        outputs = llm.generate_text_batch(prompts)
+                    except Exception as exc:  # noqa: BLE001
+                        outputs = [f"{type(exc).__name__}: {exc}"] * len(chunk)
+
+                    for row, output in zip(chunk, outputs):
                         judgement = parse_judgement(output)
-                        if judgement is not None:
-                            prompt_cache[prompt] = judgement
-                            break
+                        record = {
+                            **row,
+                            **(judgement or {}),
+                            "nyc_status": "completed" if judgement else "invalid_output",
+                            "nyc_model_output": output,
+                            "nyc_model": llm.name,
+                            "nyc_prompt": JUDGE_PROMPT,
+                            "nyc_judged_at": datetime.now(timezone.utc).isoformat(),
+                        }
+                        if judgement:
+                            ledger[row["occurrence_id"]] = record
+                            counts[judgement["nyc_label"]] = counts.get(
+                                judgement["nyc_label"], 0) + 1
+                        history.write(json.dumps(record, ensure_ascii=False) + "\n")
+                    history.flush()
 
-                if judgement is None:
-                    record = {
-                        **candidate,
-                        "nyc_status": "invalid_output",
-                        "nyc_model_output": output,
-                        "nyc_model": llm.name,
-                        "nyc_prompt": JUDGE_PROMPT,
-                        "nyc_judged_at": datetime.now(timezone.utc).isoformat(),
-                    }
-                else:
-                    record = {
-                        **candidate,
-                        **judgement,
-                        "nyc_status": "completed",
-                        "nyc_model_output": output,
-                        "nyc_model": llm.name,
-                        "nyc_prompt": JUDGE_PROMPT,
-                        "nyc_judged_at": datetime.now(timezone.utc).isoformat(),
-                    }
-                    counts[judgement["nyc_label"]] = counts.get(judgement["nyc_label"], 0) + 1
+                    done = min(offset + args.batch_size, len(pending))
+                    rate = done / max(time.monotonic() - started, 1e-6)
+                    left = (len(pending) - done) / rate if rate else 0
+                    print(f"  {done}/{len(pending)}  {rate:.1f}/s  "
+                          f"eta {left/60:.0f}m  {counts}", flush=True)
 
-                history.write(json.dumps(record, ensure_ascii=False) + "\n")
-                history.flush()
-                if index % 25 == 0 or index == len(pending):
-                    print(f"  {index}/{len(pending)}  {counts}")
-
-    try:
-        summary = write_output(args.final_output, args.output, candidates, known)
-        if not args.keep_jsonl and args.output.exists():
+        summary = write_results(
+            ledger_path, args.output, rows, ledger, article_rules, rule_pass, corpus
+        )
+        if history_path.exists():
             try:
-                args.output.unlink()
+                history_path.unlink()
             except OSError as exc:
-                print(f"Warning: could not remove {args.output}: {exc}", file=sys.stderr)
-    finally:
-        lock.__exit__(None, None, None)
+                print(f"Warning: could not remove {history_path}: {exc}", file=sys.stderr)
 
-    print(f"\nWrote {args.final_output}")
+    print(f"\nWrote {args.output}")
     print(json.dumps(summary, indent=2))
     return 0
+
+
+def write_results(
+    ledger_path: Path,
+    output_path: Path,
+    rows: list[dict[str, Any]],
+    ledger: dict[str, dict[str, Any]],
+    article_rules: dict[str, dict[str, Any]],
+    rule_pass: set[str],
+    corpus: dict[str, dict[str, Any]],
+) -> dict[str, Any]:
+    """Write the full ledger, then the New York deliverable derived from it."""
+    judged = [ledger[r["occurrence_id"]] for r in rows if r["occurrence_id"] in ledger]
+    write_json(ledger_path, {
+        "summary": {"judged": len(judged), "of_images": len(rows)},
+        "rules_version": RULES_VERSION,
+        "prompt": JUDGE_PROMPT,
+        "results": judged,
+    })
+
+    # An image passes on its own verdict; an article passes on the rule check.
+    image_pass = {
+        r["occurrence_id"] for r in judged if r.get("nyc_label") in KEEP_LABELS
+    }
+    articles_from_images = {
+        r["article_url"] for r in rows if r["occurrence_id"] in image_pass
+    }
+    kept_articles = rule_pass | articles_from_images
+
+    kept: list[dict[str, Any]] = []
+    for row in rows:
+        oid = row["occurrence_id"]
+        by_image = oid in image_pass
+        by_article = row["article_url"] in rule_pass
+        if not (by_image or by_article):
+            continue
+        rules = article_rules.get(row["article_url"]) or {}
+        kept.append({
+            **(ledger.get(oid) or row),
+            **rules,
+            "kept_by_image": by_image,
+            "kept_by_article": by_article,
+        })
+
+    articles = []
+    for url in sorted(kept_articles):
+        article = corpus[url]
+        rules = article_rules.get(url) or {}
+        articles.append({
+            "article_url": url,
+            "article_title": article.get("title") or "",
+            "article_date": article.get("date") or "",
+            "outlet": article.get("outlet") or "unknown",
+            "flood_score": article.get("flood_score"),
+            "kept_by_rule": url in rule_pass,
+            "kept_by_image": url in articles_from_images,
+            "image_count": sum(1 for k in kept if k["article_url"] == url),
+            **rules,
+        })
+
+    labels = collections.Counter(
+        k.get("nyc_label") or "unjudged" for k in kept
+    )
+    summary = {
+        "flood_images_examined": len(rows),
+        "flood_articles_examined": len({r["article_url"] for r in rows}),
+        "images_judged": len(judged),
+        "images_kept": len(kept),
+        "articles_kept": len(articles),
+        "kept_by_image_check": len(image_pass),
+        "kept_by_article_rule_only": sum(
+            1 for k in kept if k["kept_by_article"] and not k["kept_by_image"]
+        ),
+        "articles_passing_rule": len(rule_pass),
+        "articles_added_by_an_image": len(articles_from_images - rule_pass),
+        "kept_by_label": dict(labels),
+        "ledger": str(ledger_path),
+    }
+    write_json(output_path, {
+        "summary": summary,
+        "rules_version": RULES_VERSION,
+        "prompt": JUDGE_PROMPT,
+        "keep_labels": list(KEEP_LABELS),
+        "articles": articles,
+        "results": kept,
+    })
+    return summary
 
 
 if __name__ == "__main__":

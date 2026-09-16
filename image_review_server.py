@@ -115,12 +115,10 @@ def load_nyc_labels(nyc_file: Path) -> dict[str, dict]:
 def load_catalog(results_file: Path, nyc_labels: dict[str, dict] | None = None) -> dict:
     """One catalog item per classified image, carrying every fact about it.
 
-    ALL rows are loaded, `no` included. The old labelling page loaded only
-    `yes` rows and hid the rest behind a launch flag, so that the page could
-    not drift into showing rejects by way of a stale select. The merged page
-    keeps that guarantee differently, and more visibly: the answer filter opens
-    on `yes` (see --answer) and every card carries its YES/NO badge, so a
-    rejected image is never mistakable for part of the dataset.
+    ALL rows are loaded, `no` included, and the page shows only the `yes`
+    ones -- it has no answer control to leave on the wrong value. The `no`
+    rows still travel because decisions are keyed by `id` and a decision made
+    on a rejected image before the control was removed must still export.
     """
     try:
         payload = json.loads(results_file.read_text(encoding="utf-8"))
@@ -255,14 +253,6 @@ def main() -> None:
         help="New York labels from verification/filter_nyc.py. Optional: if it "
              "is missing the site loads with the New York filter disabled.",
     )
-    parser.add_argument(
-        "--answer",
-        choices=("yes", "no", "all"),
-        default="yes",
-        help="Which model verdict the page opens on (default: yes, the dataset "
-             "itself). All rows are always loaded; this only sets the starting "
-             "filter, which the page then shows and lets you change.",
-    )
     args = parser.parse_args()
 
     if not args.results.is_file():
@@ -275,7 +265,6 @@ def main() -> None:
 
     nyc_labels = load_nyc_labels(args.nyc_file)
     catalog = load_catalog(args.results, nyc_labels)
-    catalog["default_answer"] = args.answer
     summary = catalog["summary"]
 
     if nyc_labels:
@@ -301,7 +290,7 @@ def main() -> None:
         f"at http://{args.host}:{args.port}",
         flush=True,
     )
-    print(f"Opening on model answer = {args.answer}. Press Ctrl+C to stop.", flush=True)
+    print("Showing the model's yes images. Press Ctrl+C to stop.", flush=True)
     try:
         server.serve_forever()
     except KeyboardInterrupt:

@@ -15,33 +15,11 @@
         <h1>Image review</h1>
         <p id="summary" class="lede" aria-live="polite">Loading catalog…</p>
       </div>
-      <div class="stats" aria-label="Dataset summary">
-        <div class="stat stat-total"><span id="totalCount">—</span><small>All images</small></div>
-        <div class="stat stat-yes"><span id="yesCount">—</span><small>Model yes</small></div>
-        <div class="stat stat-no"><span id="noCount">—</span><small>Model no</small></div>
-        <div class="stat stat-reviewed"><span id="reviewedCount">—</span><small>You reviewed</small></div>
-      </div>
     </header>
 
     <main>
       <section class="control-panel" aria-label="Image filters">
-        <div class="answer-filter" role="group" aria-label="Filter by model answer">
-          <button class="answer-button" type="button" data-answer="all" aria-pressed="false">
-            All <span id="allButtonCount">—</span>
-          </button>
-          <button class="answer-button answer-yes" type="button" data-answer="yes" aria-pressed="false">
-            Yes <span id="yesButtonCount">—</span>
-          </button>
-          <button class="answer-button answer-no" type="button" data-answer="no" aria-pressed="false">
-            No <span id="noButtonCount">—</span>
-          </button>
-        </div>
-
         <div class="secondary-filters">
-          <label class="search-field">
-            <span>Search</span>
-            <input id="search" type="search" placeholder="Title, caption, place, or model output">
-          </label>
           <label>
             <span>Outlet</span>
             <select id="outlet"><option value="all">All outlets</option></select>
@@ -54,25 +32,6 @@
               <option value="nyc">NYC only (5 boroughs)</option>
               <option value="metro">NYC metro (NJ / LI / CT)</option>
               <option value="none">Outside New York</option>
-            </select>
-          </label>
-          <label>
-            <span>Your review</span>
-            <select id="reviewState">
-              <option value="all">Any status</option>
-              <option value="unreviewed">Not reviewed</option>
-              <option value="reviewed">Reviewed</option>
-              <option value="useful">Marked useful</option>
-              <option value="reject">Marked reject</option>
-              <option value="unsure">Marked unsure</option>
-            </select>
-          </label>
-          <label>
-            <span>Article check</span>
-            <select id="verification">
-              <option value="all">All articles</option>
-              <option value="verified">Flood verified</option>
-              <option value="unverified">Not verified</option>
             </select>
           </label>
           <label>
@@ -98,7 +57,7 @@
       <section id="imageGrid" class="image-grid" aria-label="Dataset images"></section>
       <section id="emptyState" class="empty-state" hidden>
         <h2>No images match these filters</h2>
-        <p>Try another answer, outlet, location, or review status.</p>
+        <p>Try another outlet or location.</p>
       </section>
 
       <nav class="pagination" aria-label="Results pages">

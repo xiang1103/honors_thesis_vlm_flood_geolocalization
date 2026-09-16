@@ -30,26 +30,14 @@ const state = {
   filtered: [],
   summary: null,
   reviews: loadReviews(),
-  answer: "yes",
   page: 1,
   viewerIndex: -1,
 };
 
 const ui = {
   summary: document.querySelector("#summary"),
-  totalCount: document.querySelector("#totalCount"),
-  yesCount: document.querySelector("#yesCount"),
-  noCount: document.querySelector("#noCount"),
-  reviewedCount: document.querySelector("#reviewedCount"),
-  allButtonCount: document.querySelector("#allButtonCount"),
-  yesButtonCount: document.querySelector("#yesButtonCount"),
-  noButtonCount: document.querySelector("#noButtonCount"),
-  answerButtons: [...document.querySelectorAll("[data-answer]")],
-  search: document.querySelector("#search"),
   outlet: document.querySelector("#outlet"),
   nyc: document.querySelector("#nyc"),
-  reviewState: document.querySelector("#reviewState"),
-  verification: document.querySelector("#verification"),
   sortOrder: document.querySelector("#sortOrder"),
   exportReviews: document.querySelector("#exportReviews"),
   resultCount: document.querySelector("#resultCount"),
@@ -271,14 +259,6 @@ function matchesNyc(item, mode) {
   return true;
 }
 
-function matchesReviewState(item, mode) {
-  const decision = state.reviews[item.id];
-  if (mode === "all") return true;
-  if (mode === "reviewed") return Boolean(decision);
-  if (mode === "unreviewed") return !decision;
-  return decision === mode;
-}
-
 function sortItems(items) {
   const order = ui.sortOrder.value;
   return items.sort((a, b) => {
@@ -289,16 +269,10 @@ function sortItems(items) {
 }
 
 function filteredItems() {
-  const query = ui.search.value.trim().toLocaleLowerCase();
   const matches = state.items.filter((item) => {
-    if (state.answer !== "all" && item.model_answer !== state.answer) return false;
+    if (item.model_answer !== "yes") return false;
     if (ui.outlet.value !== "all" && item.outlet !== ui.outlet.value) return false;
-    if (!matchesNyc(item, ui.nyc.value)) return false;
-    if (!matchesReviewState(item, ui.reviewState.value)) return false;
-    if (ui.verification.value === "verified" && !item.article_flood_verified) return false;
-    if (ui.verification.value === "unverified" && item.article_flood_verified) return false;
-    const text = `${item.article_title} ${item.caption} ${item.model_output} ${item.outlet} ${item.nyc_place}`.toLocaleLowerCase();
-    return !query || text.includes(query);
+    return matchesNyc(item, ui.nyc.value);
   });
   return sortItems(matches);
 }
@@ -308,20 +282,12 @@ function filteredItems() {
 function renderSummary() {
   const s = state.summary;
   if (!s) return;
-  const reviewed = Object.keys(state.reviews).length;
-  ui.totalCount.textContent = s.images.toLocaleString();
-  ui.yesCount.textContent = s.model_yes.toLocaleString();
-  ui.noCount.textContent = s.model_no.toLocaleString();
-  ui.reviewedCount.textContent = reviewed.toLocaleString();
-  ui.allButtonCount.textContent = s.images.toLocaleString();
-  ui.yesButtonCount.textContent = s.model_yes.toLocaleString();
-  ui.noButtonCount.textContent = s.model_no.toLocaleString();
   const nycNote = s.nyc_available
     ? ` ${s.nyc.toLocaleString()} labelled New York City, ${s.nyc_metro.toLocaleString()} NYC metro.`
     : "";
   ui.summary.textContent =
-    `${s.unique_images.toLocaleString()} distinct images across ${s.articles.toLocaleString()} `
-    + `articles and ${s.outlets.length} outlets.${nycNote}`;
+    `${s.model_yes.toLocaleString()} images the model accepted, from `
+    + `${s.articles.toLocaleString()} articles across ${s.outlets.length} outlets.${nycNote}`;
   // Without the labels every image reads as "not New York", which would look
   // like a finding rather than a missing file. Disable the control instead.
   ui.nyc.disabled = !s.nyc_available;
@@ -339,10 +305,9 @@ function renderGrid() {
   ui.grid.replaceChildren(...pageItems.map((item, offset) => renderCard(item, start + offset)));
   ui.empty.hidden = pageItems.length > 0;
 
-  const label = state.answer === "all" ? "images" : `${state.answer.toUpperCase()} images`;
   const first = pageItems.length ? start + 1 : 0;
   const last = Math.min(start + PAGE_SIZE, state.filtered.length);
-  ui.resultCount.textContent = `${state.filtered.length.toLocaleString()} matching ${label} · showing ${first}–${last}`;
+  ui.resultCount.textContent = `${state.filtered.length.toLocaleString()} matching images · showing ${first}–${last}`;
   ui.pageStatus.textContent = `Page ${state.page} of ${pageCount}`;
   ui.paginationStatus.textContent = `${state.page} / ${pageCount}`;
   ui.previousPage.disabled = state.page <= 1;
@@ -449,25 +414,8 @@ function exportReviews() {
 
 // -- wiring -----------------------------------------------------------------
 
-function setAnswer(value) {
-  state.answer = value;
-  for (const button of ui.answerButtons) {
-    const active = button.dataset.answer === value;
-    button.classList.toggle("active", active);
-    button.setAttribute("aria-pressed", String(active));
-  }
-}
-
-ui.answerButtons.forEach((button) => {
-  button.addEventListener("click", () => {
-    setAnswer(button.dataset.answer);
-    state.page = 1;
-    renderGrid();
-  });
-});
-
-for (const control of [ui.search, ui.outlet, ui.nyc, ui.reviewState, ui.verification, ui.sortOrder]) {
-  control.addEventListener(control === ui.search ? "input" : "change", () => {
+for (const control of [ui.outlet, ui.nyc, ui.sortOrder]) {
+  control.addEventListener("change", () => {
     state.page = 1;
     renderGrid();
   });
@@ -497,13 +445,9 @@ document.addEventListener("keydown", (event) => {
   const choice = REVIEW_CHOICES[["1", "2", "3"].indexOf(event.key)];
   if (choice) {
     const item = state.filtered[state.viewerIndex];
-    // Re-renders the grid underneath, which rebuilds state.filtered. Only the
-    // review-status filter can drop this item from it, so guard the index.
     if (item) {
       setReview(item, choice[0]);
-      state.viewerIndex = Math.min(state.viewerIndex, state.filtered.length - 1);
-      if (state.viewerIndex < 0) ui.viewer.close();
-      else renderViewer();
+      renderViewer();
     }
   }
 });
@@ -516,7 +460,6 @@ fetch("/api/images")
   .then((catalog) => {
     state.items = catalog.items;
     state.summary = catalog.summary;
-    setAnswer(catalog.default_answer || "yes");
 
     // The server is the authority on the current id scheme. Disagreement means
     // the ids were changed without migrating, so say so loudly rather than
