@@ -1,0 +1,121 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="description" content="Local review interface for the New York GIS flood-photo dataset">
+    <meta name="color-scheme" content="dark">
+    <title>GIS flood photo review</title>
+    <link rel="stylesheet" href="/shared/styles.css">
+    <link rel="stylesheet" href="gis.css">
+  </head>
+  <body>
+    <header class="site-header">
+      <div class="header-copy">
+        <p class="eyebrow">VLM flooding dataset · New York GIS sources</p>
+        <h1>GIS photo review</h1>
+        <p id="summary" class="lede" aria-live="polite">Loading catalog…</p>
+      </div>
+    </header>
+
+    <main>
+      <section class="control-panel" aria-label="Image filters">
+        <div class="secondary-filters gis-filters">
+          <label>
+            <span>Source</span>
+            <select id="source"><option value="all">All sources</option></select>
+          </label>
+          <label>
+            <span>Event / type</span>
+            <select id="event"><option value="all">All events</option></select>
+          </label>
+          <label>
+            <span>Location</span>
+            <select id="location">
+              <option value="all">All of New York State</option>
+              <option value="nyc">NYC only (5 boroughs)</option>
+              <option value="ny">NY State outside NYC</option>
+              <option value="unknown">NYC unknown (no coordinates)</option>
+              <option value="coords">Has coordinates</option>
+            </select>
+          </label>
+          <label>
+            <span>Your decision</span>
+            <select id="reviewFilter">
+              <option value="all">All images</option>
+              <option value="unreviewed">Not reviewed yet</option>
+              <option value="useful">Useful</option>
+              <option value="reject">Rejected</option>
+              <option value="unsure">Unsure</option>
+            </select>
+          </label>
+          <label>
+            <span>Sort</span>
+            <select id="sortOrder">
+              <option value="newest">Newest first</option>
+              <option value="oldest">Oldest first</option>
+              <option value="source">Source A–Z</option>
+            </select>
+          </label>
+          <button class="secondary" id="exportReviews" type="button">Export decisions</button>
+        </div>
+      </section>
+
+      <section class="results-heading" aria-live="polite">
+        <div>
+          <p id="resultCount">Loading images…</p>
+          <p class="browser-note">Images load from the original source URLs in your browser; they are not downloaded by this site. Decisions are saved in this browser only.</p>
+        </div>
+        <span id="pageStatus"></span>
+      </section>
+
+      <section id="imageGrid" class="image-grid" aria-label="Dataset images"></section>
+      <section id="emptyState" class="empty-state" hidden>
+        <h2>No images match these filters</h2>
+        <p>Try another source, event or location.</p>
+      </section>
+
+      <nav class="pagination" aria-label="Results pages">
+        <button id="previousPage" type="button">← Previous</button>
+        <span id="paginationStatus"></span>
+        <button id="nextPage" type="button">Next →</button>
+      </nav>
+    </main>
+
+    <dialog id="viewer" class="viewer">
+      <button id="closeViewer" class="close-button" type="button" aria-label="Close image viewer">×</button>
+      <div class="viewer-layout">
+        <div class="viewer-media">
+          <img id="viewerImage" alt="">
+          <div id="viewerFallback" class="image-fallback" hidden>
+            <strong>Image could not be loaded</strong>
+            <span>Use the original image link to inspect it.</span>
+          </div>
+          <div class="viewer-navigation">
+            <button id="previousImage" type="button" aria-label="Previous matching image">←</button>
+            <span id="viewerPosition"></span>
+            <button id="nextImage" type="button" aria-label="Next matching image">→</button>
+          </div>
+        </div>
+        <article class="viewer-details">
+          <div id="viewerBadges" class="badges"></div>
+          <h2 id="viewerTitle"></h2>
+          <p id="viewerText" class="viewer-caption"></p>
+          <section class="review-panel">
+            <span>Your decision <small>keys 1 · 2 · 3</small></span>
+            <div id="viewerReview"></div>
+          </section>
+          <dl id="viewerMetadata"></dl>
+          <div class="viewer-links">
+            <a id="viewerSourceLink" target="_blank" rel="noopener noreferrer">Open source page ↗</a>
+            <a id="viewerImageLink" target="_blank" rel="noopener noreferrer">Open original image ↗</a>
+            <a id="viewerMapLink" target="_blank" rel="noopener noreferrer">Map ↗</a>
+            <a id="viewerStreetViewLink" target="_blank" rel="noopener noreferrer">Street View ↗</a>
+          </div>
+        </article>
+      </div>
+    </dialog>
+
+    <script src="app.js"></script>
+  </body>
+</html>

@@ -1,0 +1,24 @@
+/* GIS-site additions on top of /shared/styles.css (the news site's sheet). */
+
+.gis-filters { grid-template-columns: repeat(5, minmax(140px, 1fr)) auto; }
+
+.badge.source { color: var(--blue); }
+.badge.ny { border-color: var(--line); color: var(--text); }
+.badge.unknown { color: var(--amber); }
+.badge.event { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+.card-meta { margin: 0 0 6px; color: var(--muted); font-size: 0.78rem; }
+
+.viewer-caption { white-space: pre-wrap; }
+
+@media (max-width: 1100px) {
+  .gis-filters { grid-template-columns: repeat(3, minmax(140px, 1fr)); }
+}
+
+@media (max-width: 800px) {
+  .gis-filters { grid-template-columns: 1fr 1fr; }
+}
+
+@media (max-width: 560px) {
+  .gis-filters { grid-template-columns: 1fr; }
+}
