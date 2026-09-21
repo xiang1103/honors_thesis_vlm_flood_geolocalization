@@ -4,9 +4,11 @@ Find duplicate images in data/mycoast.json by CONTENT and drop the repeats.
 
 `dedupe.py` works on the verifier's flat one-row-per-image file. MyCoast is
 shaped differently -- one row per REPORT with its images nested -- so a
-duplicate here is an image entry, not a row. Reports are never dropped: a
-report whose every image was a repeat keeps its coordinates, time and text
-with an empty `images` list, like the reports that never had any.
+duplicate here is an image entry, not a row. Every report left with no
+images is then dropped: both the ones dedupe emptied (every photo a repeat of
+an earlier report's, i.e. a re-submission) and the ones MyCoast never had a
+photo for (`ImageUrls` empty in the API). This is an image dataset; a report
+with nothing to show is not a row in it.
 
 Fingerprints are the same as dedupe.py's (`local_vlm.backend.image_digests`):
 sha256 of the decoded RGB pixels, plus a 64-bit dHash. They are cached by URL
@@ -164,9 +166,14 @@ def main() -> int:
         report["images"] = kept
         report["image_count"] = len(kept)
 
+    # No images left, whether dedupe emptied it or it never had any.
+    before = len(reports)
+    reports = [r for r in reports if r.get("images")]
+
     write_json(args.input, reports)
     left = sum(len(r.get("images") or []) for r in reports)
-    print(f"\ndropped {len(drop)} duplicate images from {touched} reports; "
+    print(f"\ndropped {len(drop)} duplicate images from {touched} reports, "
+          f"then {before - len(reports)} reports left with no images; "
           f"{left} images remain across {len(reports)} reports")
     print(f"written: {args.input}")
     return 0

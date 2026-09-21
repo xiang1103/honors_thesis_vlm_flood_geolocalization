@@ -76,20 +76,6 @@ which read the same file and showed the same images; they are merged.
 python3 image_review_server.py          # http://127.0.0.1:8765
 ```
 
-Each card carries the model's YES/NO verdict, the New York label, and your own
-decision. Filters: model answer, search, outlet, New York, your review status,
-article flood-check, and sort. Click an image for the full-size viewer, where
-1/2/3 record Useful/Reject/Unsure and the arrow keys move through the matches.
-"Export decisions" writes them to JSON.
-
-All rows load; the page opens on the model's `yes` images, which is the dataset
-itself. `--answer no` or `--answer all` opens elsewhere. New York labels come
-from `data/nyc_scraped_images.json` when it exists (`--nyc-file` to point
-elsewhere); without it the site runs with that one filter disabled.
-
-Review decisions live only in this browser's localStorage. There is no
-server-side copy -- export them before clearing site data.
-
 ## 4. GIS flood photos (New York State)
 
 A second source alongside the news crawl: public APIs whose records carry
@@ -116,23 +102,13 @@ python3 scraping/api_based_scraping/gis_scrape.py --sources mycoast,stn # a subs
 ```
 
 ### GIS review site
+Scraped different government GIS apis, only myCoast API is used for most of the street view images. 
 
 ```bash
 python3 gis_review_server.py                     # http://127.0.0.1:8768
 python3 gis_review_server.py --port 8770         # if 8768 is taken
 ```
 
-
-## Good sites 
-or "street-view flooded, crowdsourced, with coordinates," Mapillary already is the social platform 
-  you're describing. It's user-contributed street-level imagery whose entire purpose is carrying GPS  
-  and heading — and it has capture timestamps, so you can pull the same coordinates before and during 
-  a flood event. No other crowdsourced source gives you that pairing.                                 
-                                                                                                      
-  Also worth checking before building anything: CrisisMMD and MEDIC (disaster social-media images with
-  labels, no coords), FloodNet (UAV imagery of post-Harvey flooding, georeferenced but aerial), and   
-  Copernicus EMS (flood extents, satellite). None are street-level VPR datasets, but they'll tell you 
-  what's been tried.
 
 
 ## Future Designs 

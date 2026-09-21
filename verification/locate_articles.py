@@ -39,7 +39,7 @@ from pathlib import Path
 from typing import Any
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from country_codes import CountryResolver, load_resolver, summarise, write_json  # noqa: E402
+from country_codes import dedupe, load_resolver, summarise, write_json  # noqa: E402
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -184,25 +184,6 @@ def parse_floods(text: str) -> list[dict[str, str]] | None:
     return None
 
 
-def dedupe(countries: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    """Collapse repeats of the same resolved country within one article.
-
-    "One entry per country" is in the prompt and is mostly obeyed, but a
-    round-up that returns India twice would double its weight on the map. Keyed
-    on the RESOLVED code so "UK" and "Britain" collapse too; unresolved rows
-    fall back to their raw text so they are not all merged into one.
-    """
-    seen: set[str] = set()
-    out = []
-    for country in countries:
-        key = country.get("alpha_2") or f"raw:{country.get('raw_country', '').lower()}"
-        if key in seen:
-            continue
-        seen.add(key)
-        out.append(country)
-    return out
-
-
 # --------------------------------------------------------------------------
 # I/O
 # --------------------------------------------------------------------------
@@ -245,6 +226,32 @@ def read_ledger(path: Path) -> dict[str, dict[str, Any]]:
         for r in payload.get("results", [])
         if r.get("article_url") and r.get("status") == "completed"
     }
+
+
+def read_history(path: Path) -> dict[str, dict[str, Any]]:
+    """Records a previous, interrupted run appended but never merged.
+
+    The JSONL is appended and flushed per batch, so it is the only thing
+    holding a killed run's work -- the ledger is not written until the end.
+    A `.jsonl` here is unmerged work, not garbage (same rule as the crawl's),
+    so it is folded into the ledger on startup rather than ignored, and a
+    truncated final line is skipped instead of killing the run.
+    """
+    if not path.exists():
+        return {}
+    recovered: dict[str, dict[str, Any]] = {}
+    with path.open("r", encoding="utf-8") as handle:
+        for line in handle:
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                record = json.loads(line)
+            except json.JSONDecodeError:
+                continue          # last line of a killed run, mid-write
+            if record.get("article_url") and record.get("status") == "completed":
+                recovered[record["article_url"]] = record
+    return recovered
 
 
 @contextlib.contextmanager
@@ -338,6 +345,11 @@ def main() -> int:
 
     with exclusive_run(args.ledger):
         ledger = read_ledger(args.ledger)
+        recovered = read_history(history_path)
+        if recovered:
+            print(f"Recovered {len(recovered)} records from an interrupted run "
+                  f"({history_path.name})")
+            ledger.update(recovered)
         pending = [a for a in articles if a["url"] not in ledger]
         if args.limit is not None:
             pending = pending[:args.limit]

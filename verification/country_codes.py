@@ -84,6 +84,7 @@ class CountryResolver:
         self.collisions: list[str] = []
 
         self._index: dict[str, str] = {}
+        self._priority: dict[str, int] = {}
         for priority, field in ((0, "name"), (0, "common_name"), (1, "official_name")):
             for country in table["countries"]:
                 value = country.get(field)
@@ -93,7 +94,6 @@ class CountryResolver:
                 existing = self._index.get(key)
                 if existing is None:
                     self._index[key] = country["alpha_2"]
-                    self._priority = getattr(self, "_priority", {})
                     self._priority[key] = priority
                 elif existing != country["alpha_2"] and priority >= self._priority[key]:
                     self.collisions.append(f"{value!r}: {existing} vs {country['alpha_2']}")
@@ -190,6 +190,43 @@ def load_resolver(table_path: Path = DEFAULT_TABLE,
     return CountryResolver(table, aliases)
 
 
+#: How much each resolution path is trusted, best first. Used only to pick a
+#: survivor when one article yields the same country twice -- "Bavaria" with a
+#: DE code and "Germany" are one country, and the row that says `exact` is the
+#: honest audit trail for it.
+RESOLUTION_RANK = {
+    "exact": 0, "alias": 1, "name_over_code": 2, "code_guess": 3, "unresolved": 4,
+}
+
+
+def dedupe(countries: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Collapse repeats of the same resolved country within one article.
+
+    "One entry per country" is in the prompt and is mostly obeyed, but a
+    round-up that returned India twice would double its weight on the map.
+    Keyed on the RESOLVED code, so "UK" and "Britain" collapse too -- which is
+    also why this has to run again after every re-resolution: an alias added
+    later can turn two rows that looked distinct into the same country.
+    Unresolved rows fall back to their raw text, so they are not all merged
+    into a single empty entry.
+    """
+    best: dict[str, int] = {}          # key -> index into `out`
+    out: list[dict[str, Any]] = []
+    for country in countries:
+        key = country.get("alpha_2") or f"raw:{country.get('raw_country', '').strip().lower()}"
+        rank = RESOLUTION_RANK.get(country.get("resolution", ""), 9)
+        if key not in best:
+            best[key] = len(out)
+            out.append(country)
+            continue
+        # Keep the better-resolved row, in the position the country first
+        # appeared -- order follows the article, not the merge.
+        incumbent = out[best[key]]
+        if rank < RESOLUTION_RANK.get(incumbent.get("resolution", ""), 9):
+            out[best[key]] = country
+    return out
+
+
 # --------------------------------------------------------------------------
 # Re-resolving an existing result file
 # --------------------------------------------------------------------------
@@ -202,11 +239,11 @@ def reresolve(payload: dict[str, Any], resolver: CountryResolver) -> dict[str, A
     after every alias edit.
     """
     for article in payload.get("results", []):
-        article["countries"] = [
+        article["countries"] = dedupe([
             {**country, **resolver.resolve(country.get("raw_country"),
                                            country.get("raw_code"))}
             for country in article.get("countries", [])
-        ]
+        ])
     payload["summary"] = {**payload.get("summary", {}), **summarise(payload["results"])}
     return payload
 
