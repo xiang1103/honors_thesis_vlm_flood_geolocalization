@@ -139,6 +139,13 @@ class Client:
         self._last: dict[str, float] = {}
 
     def json(self, method: str, url: str, timeout: float = 120, **kwargs) -> Any:
+        return self.request(method, url, timeout=timeout, **kwargs).json()
+
+    def text(self, method: str, url: str, timeout: float = 120, **kwargs) -> str:
+        """The response body as text -- report pages, not APIs."""
+        return self.request(method, url, timeout=timeout, **kwargs).text
+
+    def request(self, method: str, url: str, timeout: float = 120, **kwargs) -> requests.Response:
         host = urlparse(url).netloc
         for attempt in range(self.retries + 1):
             wait = self.host_delay.get(host, 0) - (time.monotonic() - self._last.get(host, 0))
@@ -161,7 +168,7 @@ class Client:
                 time.sleep(delay)
                 continue
             resp.raise_for_status()
-            return resp.json()
+            return resp
         raise AssertionError("unreachable")
 
 

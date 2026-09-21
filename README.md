@@ -67,7 +67,7 @@ python3 verification/verify_images_vlm.py --device-map cuda:0   # pin one GPU
 ``` 
 Alternative VLM model: gemma-4-31B-it 
 
-## 3. Review site
+## 3. News Scrape Results Review site
 
 One local site. It was two -- human review on :8765 and model results on :8766 --
 which read the same file and showed the same images; they are merged.
@@ -122,24 +122,6 @@ python3 gis_review_server.py                     # http://127.0.0.1:8768
 python3 gis_review_server.py --port 8770         # if 8768 is taken
 ```
 
-To keep it running after you disconnect, start it in tmux:
-
-```bash
-tmux new -d -s gis_review 'cd /home/liu47/vlm_flood && /home/liu47/conda_envs/newEnv_local/bin/python gis_review_server.py'
-tmux attach -t gis_review        # see the log; Ctrl+B then D to detach
-tmux kill-session -t gis_review  # stop it
-```
-
-It listens on localhost only; from another machine, tunnel first:
-`ssh -L 8768:127.0.0.1:8768 <server>` and open http://127.0.0.1:8768.
-
-Same decisions and keys as the news site (1/2/3, arrow keys, "Export
-decisions"). Filters: source, event/type, location (NYC / rest of NY /
-unknown), your review status, sort. The viewer links to the source page, the
-original image, OpenStreetMap, and Google Street View at the photo's
-coordinates. The server reads `data/gis_flood_images.json` once at start --
-restart it after re-running `gis_scrape.py`. Decisions are stored in this
-browser only, separately from the news site's.
 
 ## Good sites 
 or "street-view flooded, crowdsourced, with coordinates," Mapillary already is the social platform 
@@ -157,7 +139,12 @@ or "street-view flooded, crowdsourced, with coordinates," Mapillary already is t
 
 **Get Street Images:** 
 - if we can find out reports of where flood has happened, use Google Maps API to find the street-view image for that time 
-
+- Flickr API 
 
 ## Limitations 
 - Near identical images (ex: cropped) are not detected by hashing 
+
+## Project overview 
+- location (long + lat) & time of the flood (day of month) & water depth 
+
+- 
