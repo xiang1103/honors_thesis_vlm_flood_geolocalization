@@ -18,10 +18,9 @@ venv/
 # All crawl/verify intermediates and logs (jsonl, tmp, logs)
 scrape_data/
 
-data/image_hashes.json
-data/news_scrape_results.json
-data/verified_images_news.json
-data/nyc_scraped_images.json
-data/gis_flood_images.json
-data/mycoast.json
 *.lock
+
+# Everything under data/ except the metadata summary.
+# `data/*` (not `data/`) so the negation below can re-include a file.
+data/*
+!data/meta_data.json
