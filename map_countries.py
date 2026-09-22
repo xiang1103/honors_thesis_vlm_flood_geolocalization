@@ -185,9 +185,11 @@ def main() -> int:
                         secondary=("mention_rank", lambda s: int((s > 0).sum())))
                    .reset_index())
 
+    n_articles = frame["article_url"].nunique()
     print(f"rows {before} -> {len(frame)} after filters"
           + (f"  ({unplottable} unresolved dropped)" if unplottable else ""))
-    print(f"countries: {len(counts)}   mentions: {int(counts['articles'].sum())}")
+    print(f"articles: {n_articles}   mentions: {int(counts['articles'].sum())}   "
+          f"countries: {len(counts)}")
 
     # -- the map ----------------------------------------------------------
     counts["colour"] = counts["articles"] if args.linear else np.log10(counts["articles"])
@@ -211,8 +213,14 @@ def main() -> int:
                     "alpha_3": False, "colour": False},
         color_continuous_scale="Blues",
         projection=args.projection,
-        title=f"Flood coverage in the news corpus{subtitle}"
-              f" — {int(counts['articles'].sum())} article mentions, "
+        # Articles and mentions are DIFFERENT numbers and the title says both.
+        # "8,547 article mentions" read as 8,547 articles, which is wrong and
+        # invited the question of whether unverified articles had leaked in:
+        # the input is only what verify_text flagged flood_verified, and 962
+        # of those name more than one country.
+        title=f"Flood coverage in the news corpus{subtitle} — "
+              f"{n_articles:,} flood-verified articles · "
+              f"{int(counts['articles'].sum()):,} country mentions · "
               f"{len(counts)} countries",
     )
     if args.linear:
