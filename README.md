@@ -109,6 +109,11 @@ python3 gis_review_server.py                     # http://127.0.0.1:8768
 python3 gis_review_server.py --port 8770         # if 8768 is taken
 ```
 
+## Open map view 
+```bash 
+python3 map_countries.py 
+```
+
 
 
 ## Future Designs 

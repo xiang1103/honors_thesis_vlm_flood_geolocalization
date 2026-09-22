@@ -79,6 +79,7 @@ python3 verification/country_codes.py                      # re-resolve, no GPU
 python3 verification/compile_countries.py                  # totals + flat CSV to plot
 python3 map_countries.py                                   # interactive choropleth
 python3 map_countries.py --primary-only --exclude-outlet floodlist   # any cut
+python3 map_countries.py --serve                           # + serve on :8768, tunnel to view
 
 # audit text scores / remove duplicate images
 python3 verification/verify_text.py data/news_scrape_results.json
@@ -113,8 +114,10 @@ compile_countries.py -->
     data/country_rows.csv             one row per (article, country), flat
         |
 map_countries.py -->
-    data/flood_map.html               plotly choropleth; filters apply BEFORE
-                                      aggregation so counts match what is drawn
+    data/map_view/flood_map.html      plotly choropleth, ALWAYS this one file;
+                                      filters apply BEFORE aggregation so the
+                                      counts match what is drawn, and the cut
+                                      is written into the map's own title
 ```
 
 Supporting files: `data/image_hashes.json` (fingerprint cache, makes dedupe
