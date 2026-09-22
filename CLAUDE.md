@@ -45,7 +45,8 @@ disk pressure without checking the absolute number first.
 scraping/         crawling only        scrape.py, adapters.py, run_crawl.sh, design.md
   api_based_scraping/   superseded GDELT approach: news_scrape.py + news_api_design.md
 verification/     judging only         verify_text.py, verify_images_vlm.py, dedupe.py
-                  country pass         locate_articles.py, country_codes.py, make_iso_table.py
+                  country pass         locate_articles.py, country_codes.py, make_iso_table.py,
+                                       compile_countries.py
 local_vlm/        model mechanics      backend.py, download_model.py
 image_review_web/       + image_review_server.py       human review site  :8765
 image_vlm_review_web/   + image_vlm_review_server.py   model results site :8766
@@ -75,6 +76,7 @@ python3 verification/make_iso_table.py                     # once, needs pycount
 python3 verification/locate_articles.py --limit 50 --device-map cuda:0   # trial
 python3 verification/locate_articles.py --device-map cuda:0
 python3 verification/country_codes.py                      # re-resolve, no GPU
+python3 verification/compile_countries.py                  # totals + flat CSV to plot
 
 # audit text scores / remove duplicate images
 python3 verification/verify_text.py data/news_scrape_results.json
@@ -103,7 +105,10 @@ dedupe.py -->  same file, exact duplicates removed
 
 locate_articles.py  (reads the CORPUS, not the image results) -->
     data/article_countries.json       one record per flood article, with the
-                                      countries that flooded; joins on article_url
+        |                             countries that flooded; joins on article_url
+compile_countries.py -->
+    data/country_totals.json          one row per country, join a map on alpha_3
+    data/country_rows.csv             one row per (article, country), flat
 ```
 
 Supporting files: `data/image_hashes.json` (fingerprint cache, makes dedupe
