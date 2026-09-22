@@ -77,6 +77,8 @@ python3 verification/locate_articles.py --limit 50 --device-map cuda:0   # trial
 python3 verification/locate_articles.py --device-map cuda:0
 python3 verification/country_codes.py                      # re-resolve, no GPU
 python3 verification/compile_countries.py                  # totals + flat CSV to plot
+python3 map_countries.py                                   # interactive choropleth
+python3 map_countries.py --primary-only --exclude-outlet floodlist   # any cut
 
 # audit text scores / remove duplicate images
 python3 verification/verify_text.py data/news_scrape_results.json
@@ -109,6 +111,10 @@ locate_articles.py  (reads the CORPUS, not the image results) -->
 compile_countries.py -->
     data/country_totals.json          one row per country, join a map on alpha_3
     data/country_rows.csv             one row per (article, country), flat
+        |
+map_countries.py -->
+    data/flood_map.html               plotly choropleth; filters apply BEFORE
+                                      aggregation so counts match what is drawn
 ```
 
 Supporting files: `data/image_hashes.json` (fingerprint cache, makes dedupe
