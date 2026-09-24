@@ -20,7 +20,8 @@ scrape_data/
 
 *.lock
 
-# Everything under data/ except the metadata summary.
+# Everything under data/ except the metadata summaries.
 # `data/*` (not `data/`) so the negation below can re-include a file.
 data/*
 !data/meta_data.json
+!data/mycoast_meta_data.json
