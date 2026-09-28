@@ -124,8 +124,8 @@ python3 scraping/api_based_scraping/mycoast_scrape.py                    # MyCoa
 python3 scraping/api_based_scraping/mycoast_scrape.py --no-pages         # API fields only, seconds
 python3 verification/dedupe_mycoast.py --dry-run
 python3 verification/dedupe_mycoast.py --apply    # re-run after every mycoast_scrape.py
-# routine MyCoast update, in this order:
-#   mycoast_scrape.py -> dedupe_mycoast.py --apply -> gis_scrape.py --sources mycoast
+./scraping/update_mycoast.sh                     # ROUTINE MyCoast update: the three steps
+                                                  # in order: scrape -> dedupe -> gis refresh
 
 # review sites
 python3 image_review_server.py          # :8765 news, human labels + model answers
@@ -136,6 +136,8 @@ python3 gis_review_server.py            # :8768 GIS/MyCoast, reads gis_flood_ima
 pass `--port` to one of them if both are running.
 
 Long crawls: `./scraping/run_crawl.sh` (tmux, survives disconnect).
+MyCoast update: `./scraping/update_mycoast.sh` (scrape -> dedupe -> gis refresh,
+stops on first failure, log in `scrape_data/logs/mycoast-update_latest.log`).
 
 ## Data flow
 

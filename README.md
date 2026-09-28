@@ -141,6 +141,12 @@ python3 verification/dedupe_mycoast.py --dry-run
 python3 verification/dedupe_mycoast.py --apply                     # re-run after every scrape
 ```
 
+Routine update -- does all of it in the right order (scrape, dedupe, refresh the :8768 site's data):
+
+```bash
+./scraping/update_mycoast.sh
+```
+
 Current (2026-09-24, `data/mycoast_meta_data.json`): 1,893 reports, 2,948 images,
 994 reports in NYC, 2011–2026. Also `data/mycoast_points.csv` (one row per
 report, for plotting) and `data/map_view/mycoast_ny_map.html`.
