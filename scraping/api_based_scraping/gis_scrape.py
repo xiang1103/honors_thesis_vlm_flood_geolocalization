@@ -59,6 +59,7 @@ from typing import Any
 from urllib.parse import urlparse
 
 import requests
+from lxml import html as lhtml
 from shapely.geometry import Point, Polygon
 from shapely.prepared import prep
 from shapely.validation import make_valid
@@ -114,6 +115,16 @@ COMMONS_NYC_CATEGORY = re.compile(
 
 IMAGE_EXTENSIONS = {"jpg", "jpeg", "png", "gif", "tif", "tiff", "webp"}
 MYCOAST_SIZE_SUFFIX = re.compile(r"-\d+x\d+(?=\.\w+$)")   # WordPress thumbnail: foo-300x225.jpg
+#: Since ~2026-09 the layer's ImageUrls for a NEW report point at a staging
+#: copy on mycoast.org that 404s within days (10 of 19 were already dead on
+#: 2026-09-28). The photo then lives only on the CDN, under a timestamped
+#: directory the API never learns -- the layer is not updated afterwards. The
+#: report page links the CDN copy, so the permanent URL is taken from there.
+#: Same pixels either way (verified: identical RGB sha256, EXIF-only byte diff).
+MYCOAST_TEMPORARY_IMAGE = re.compile(r"^https?://(?:www\.)?mycoast\.org/blueurchin-reportimages/")
+#: Written by mycoast_scrape.py; read here so temporary URLs resolve without
+#: fetching report pages again.
+MYCOAST_PAGE_CACHE = PROJECT_DIR / "scrape_data" / "mycoast_pages.jsonl"
 
 
 def log(msg: str) -> None:
@@ -298,6 +309,52 @@ def mycoast_list(value: str | None) -> str | None:
     return str(parsed) if parsed else None
 
 
+def mycoast_photo_identity(url: str) -> str:
+    """Filename with WordPress's renditions stripped: "foo-scaled.jpg",
+    "foo-300x225.jpg" and "foo.jpg" are all the same photograph."""
+    name = url.split("/")[-1]
+    name = MYCOAST_SIZE_SUFFIX.sub("", name)
+    return re.sub(r"-scaled(?=\.\w+$)", "", name)
+
+
+def mycoast_page_image_urls(page_html: str) -> list[str]:
+    """<a href="...jpg" class="report-photo-grid__item">: the report page's
+    photos, in page order, on the CDN."""
+    doc = lhtml.fromstring(page_html)
+    return [str(u) for u in doc.xpath("//a[contains(@class,'report-photo-grid__item')]/@href")]
+
+
+def mycoast_permanent_url(api_url: str, page_urls: list[str]) -> str | None:
+    """The CDN original of the photo behind a temporary API URL, or None if the
+    page does not show it. The page may link WordPress's "-scaled" rendition;
+    the original sits beside it without the suffix."""
+    identity = mycoast_photo_identity(api_url)
+    for url in page_urls:
+        if mycoast_photo_identity(url) == identity:
+            return re.sub(r"-scaled(?=\.\w+$)", "", url)
+    return None
+
+
+def load_mycoast_pages(path: Path = MYCOAST_PAGE_CACHE) -> dict[int, dict[str, Any]]:
+    """report_id -> parsed page, from mycoast_scrape.py's cache. A corrupt line
+    is skipped, not fatal: the cache is an optimisation and the page can simply
+    be fetched again."""
+    cache: dict[int, dict[str, Any]] = {}
+    if not path.is_file():
+        return cache
+    with path.open(encoding="utf-8") as handle:
+        for line in handle:
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                row = json.loads(line)
+                cache[int(row["report_id"])] = row
+            except (json.JSONDecodeError, KeyError, TypeError, ValueError):
+                continue
+    return cache
+
+
 def collect_mycoast(client: Client, regions: Regions) -> list[dict[str, Any]]:
     types = ", ".join(f"'{t}'" for t in MYCOAST_TYPES)
     feats = arcgis_features(
@@ -310,6 +367,26 @@ def collect_mycoast(client: Client, regions: Regions) -> list[dict[str, Any]]:
                   "geo_neighborhood,Wind_Speed,Precipitation24h",
     )
     records, skipped = [], Counter()
+    pages: dict[int, dict[str, Any]] | None = None   # page cache, loaded on first temporary URL
+    page_images: dict[int, list[str]] = {}
+    resolved = unresolved = 0
+
+    def cdn_images(report_id: int, report_url: str) -> list[str]:
+        """The report page's CDN photos: the cache first, else one fetch."""
+        nonlocal pages
+        if report_id not in page_images:
+            if pages is None:
+                pages = load_mycoast_pages()
+            urls = (pages.get(report_id) or {}).get("page_image_urls")
+            if urls is None:
+                try:
+                    urls = mycoast_page_image_urls(client.text("GET", report_url))
+                except Exception as exc:          # noqa: BLE001 - keep the temporary URL instead
+                    log(f"    {report_url}: {exc.__class__.__name__}: {exc}")
+                    urls = []
+            page_images[report_id] = urls
+        return page_images[report_id]
+
     for f in feats:
         a, g = f["attributes"], f.get("geometry") or {}
         lat, lon = g.get("y"), g.get("x")
@@ -330,17 +407,31 @@ def collect_mycoast(client: Client, regions: Regions) -> list[dict[str, Any]]:
             if not thumb:
                 continue
             full = MYCOAST_SIZE_SUFFIX.sub("", thumb)   # original upload behind the resized copy
+            report_url = a.get("Report_URL") or f"https://mycoast.org/reports/{a.get('ID')}"
+            api_url = None
+            if MYCOAST_TEMPORARY_IMAGE.match(full):
+                permanent = mycoast_permanent_url(full, cdn_images(int(a["ID"]), report_url))
+                if permanent:
+                    api_url, full, thumb = full, permanent, permanent
+                    resolved += 1
+                else:
+                    unresolved += 1
             records.append(make_record(
-                "mycoast", a.get("Report_URL") or f"https://mycoast.org/reports/{a.get('ID')}", full,
+                "mycoast", report_url, full,
                 title=a.get("Title"), text=text or None, date=epoch_ms_to_iso(a.get("Date")),
                 event=a.get("Report_Type"), lat=lat, lon=lon, in_nyc=in_nyc, nyc_basis=basis,
                 thumbnail_url=thumb if thumb != full else None,
                 extra={"report_id": a.get("ID"), "state": a.get("State"),
+                       "api_image_url": api_url,
+                       "temporary_image_url": (api_url is None and bool(MYCOAST_TEMPORARY_IMAGE.match(full))) or None,
                        "locality": a.get("geo_locality"), "neighborhood": a.get("geo_neighborhood"),
                        "storm_damage": a.get("Storm_Damage"), "wind_speed": a.get("Wind_Speed"),
                        "precipitation_24h": a.get("Precipitation24h")},
             ))
     log(f"  mycoast: {len(feats)} reports in the prefilter box -> {len(records)} images; skipped {dict(skipped)}")
+    if resolved or unresolved:
+        log(f"  mycoast: {resolved} temporary image URLs replaced by their CDN original"
+            + (f"; {unresolved} could NOT be resolved and will stop working" if unresolved else ""))
     return records
 
 

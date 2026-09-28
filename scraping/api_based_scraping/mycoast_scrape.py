@@ -51,21 +51,27 @@ from lxml import html as lhtml
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from gis_scrape import (  # noqa: E402
     MYCOAST_LAYER,
+    MYCOAST_PAGE_CACHE,
     MYCOAST_SIZE_SUFFIX,
+    MYCOAST_TEMPORARY_IMAGE,
     Client,
     Regions,
     arcgis_features,
     epoch_ms_to_iso,
     join_text,
+    load_mycoast_pages,
     log,
     mycoast_list,
+    mycoast_page_image_urls,
+    mycoast_permanent_url,
+    mycoast_photo_identity,
     record_id,
     write_json,
 )
 
 PROJECT_DIR = Path(__file__).resolve().parents[2]
 DEFAULT_OUTPUT = PROJECT_DIR / "data" / "mycoast.json"
-DEFAULT_PAGE_CACHE = PROJECT_DIR / "scrape_data" / "mycoast_pages.jsonl"
+DEFAULT_PAGE_CACHE = MYCOAST_PAGE_CACHE
 
 STATE = "NY"
 REPORT_TYPES = ("Flood Watch", "Storm Reporter")
@@ -158,11 +164,12 @@ def parse_report_page(page_html: str) -> dict[str, Any]:
     if stations:
         out["tide_stations"] = stations
 
-    # <a href="...full.jpg" class="report-photo-grid__item">: the originals, in
-    # page order. The API's ImageUrls holds resized copies of the same files.
-    full = doc.xpath("//a[contains(@class,'report-photo-grid__item')]/@href")
+    # The page's photos on the CDN, in page order. The API's ImageUrls holds
+    # resized copies of the same files -- or, for recent reports, a temporary
+    # staging URL (see MYCOAST_TEMPORARY_IMAGE).
+    full = mycoast_page_image_urls(page_html)
     if full:
-        out["page_image_urls"] = [str(u) for u in full]
+        out["page_image_urls"] = full
     return out
 
 
@@ -179,25 +186,6 @@ def read_existing(path: Path) -> dict[str, dict[str, Any]]:
     return {str(row["report_id"]): row for row in rows}
 
 
-def load_page_cache(path: Path) -> dict[int, dict[str, Any]]:
-    """report_id -> parsed page. A corrupt line is skipped, not fatal: the
-    cache is an optimisation and the page can simply be fetched again."""
-    cache: dict[int, dict[str, Any]] = {}
-    if not path.is_file():
-        return cache
-    with path.open(encoding="utf-8") as handle:
-        for line in handle:
-            line = line.strip()
-            if not line:
-                continue
-            try:
-                row = json.loads(line)
-                cache[int(row["report_id"])] = row
-            except (json.JSONDecodeError, KeyError, TypeError, ValueError):
-                continue
-    return cache
-
-
 def fetch_pages(client: Client, reports: list[dict[str, Any]], cache_path: Path,
                 workers: int, refresh: bool) -> dict[int, dict[str, Any]]:
     """Fetch and parse every report page not already cached.
@@ -207,7 +195,7 @@ def fetch_pages(client: Client, reports: list[dict[str, Any]], cache_path: Path,
     minutes; each holds one connection and the pool is deliberately small,
     since this is someone else's server.
     """
-    cache = {} if refresh else load_page_cache(cache_path)
+    cache = {} if refresh else load_mycoast_pages(cache_path)
     todo = [r for r in reports if int(r["attributes"]["ID"]) not in cache]
     log(f"  pages: {len(reports) - len(todo)} cached, {len(todo)} to fetch with {workers} workers")
     if not todo:
@@ -254,14 +242,6 @@ def fetch_pages(client: Client, reports: list[dict[str, Any]], cache_path: Path,
 # Records
 # --------------------------------------------------------------------------
 
-def photo_identity(url: str) -> str:
-    """Filename with WordPress's renditions stripped: "foo-scaled.jpg",
-    "foo-300x225.jpg" and "foo.jpg" are all the same photograph."""
-    name = url.split("/")[-1]
-    name = MYCOAST_SIZE_SUFFIX.sub("", name)
-    return re.sub(r"-scaled(?=\.\w+$)", "", name)
-
-
 def local_time_iso(page: dict[str, Any]) -> str | None:
     """The report's wall-clock time.
 
@@ -296,18 +276,29 @@ def build_record(report: dict[str, Any], page: dict[str, Any], regions: Regions)
     # is the SAME photograph at about half the bytes (verified: different
     # sha256, ~2.2 MB vs ~0.9 MB). Match on the identity below so the two
     # never count as two photos; keep the original as image_url.
-    by_identity = {photo_identity(u): u for u in from_page}
+    by_identity = {mycoast_photo_identity(u): u for u in from_page}
     images = []
     for thumbnail in thumbnails:
         full = MYCOAST_SIZE_SUFFIX.sub("", thumbnail)
-        scaled = by_identity.pop(photo_identity(full), None)
-        images.append({
+        scaled = by_identity.pop(mycoast_photo_identity(full), None)
+        api_url = None
+        if MYCOAST_TEMPORARY_IMAGE.match(full):
+            # A staging URL that dies within days: keep the CDN original instead.
+            permanent = mycoast_permanent_url(full, [scaled] if scaled else [])
+            if permanent:
+                api_url, full, thumbnail = full, permanent, permanent
+        image = {
             "image_url": full,
             "thumbnail_url": thumbnail if thumbnail != full else None,
             "scaled_url": scaled if scaled and scaled != full else None,
             # Same id gis_scrape.py writes, so rows join across the two files.
             "record_id": record_id(source_url, full),
-        })
+        }
+        if api_url:
+            image["api_image_url"] = api_url
+        elif MYCOAST_TEMPORARY_IMAGE.match(full):
+            image["temporary_url"] = True     # no page detail to resolve it; will stop working
+        images.append(image)
     for leftover in by_identity.values():   # a photo on the page the API did not list
         images.append({"image_url": leftover, "thumbnail_url": None, "scaled_url": None,
                        "record_id": record_id(source_url, leftover), "page_only": True})
@@ -364,6 +355,11 @@ def summarize(rows: list[dict[str, Any]]) -> None:
         f"with page detail {with_page}, with description {sum(1 for r in rows if r['description'])}, "
         f"with local time {sum(1 for r in rows if r['local_time'])}")
     log(f"  types: {dict(Counter(r['report_type'] for r in rows))}")
+    replaced = sum(1 for r in rows for im in r["images"] if im.get("api_image_url"))
+    temporary = sum(1 for r in rows for im in r["images"] if im.get("temporary_url"))
+    if replaced or temporary:
+        log(f"  temporary image URLs: {replaced} replaced by their CDN original"
+            + (f", {temporary} UNRESOLVED (no page detail; re-run without --no-pages)" if temporary else ""))
     if flooded:
         log(f"  what is flooded: {dict(flooded.most_common(8))}")
 

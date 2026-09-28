@@ -124,6 +124,8 @@ python3 scraping/api_based_scraping/mycoast_scrape.py                    # MyCoa
 python3 scraping/api_based_scraping/mycoast_scrape.py --no-pages         # API fields only, seconds
 python3 verification/dedupe_mycoast.py --dry-run
 python3 verification/dedupe_mycoast.py --apply    # re-run after every mycoast_scrape.py
+# routine MyCoast update, in this order:
+#   mycoast_scrape.py -> dedupe_mycoast.py --apply -> gis_scrape.py --sources mycoast
 
 # review sites
 python3 image_review_server.py          # :8765 news, human labels + model answers
@@ -314,6 +316,18 @@ blocks and takes the LAST match. Thinking off is also ~10x faster
   (`-300x225.jpg`); the page links WordPress's `-scaled` copy; the original has
   neither suffix. They are different bytes of the SAME photo --
   `photo_identity()` collapses them. `image_url` is always the original.
+- **Recent MyCoast reports carry TEMPORARY image URLs.** Since ~2026-09
+  the API's `ImageUrls` for new reports point at
+  `mycoast.org/blueurchin-reportimages/...`, which 404s within days; the photo
+  then lives only at `cdn.mycoast.photos/...` (what the report page links, so
+  `mycoast_scrape.py` stores it as `scaled_url`). The API does not update the
+  URL afterwards. Both scrapers now swap it for the CDN original found on the
+  report page (`mycoast_permanent_url()` in `gis_scrape.py`, `-scaled`
+  stripped) and keep the staging URL as `api_image_url`; same pixels,
+  verified. `gis_scrape.py` reads pages from `mycoast_pages.jsonl` and fetches
+  only uncached ones, so run `mycoast_scrape.py` first. An image that could not
+  be resolved is flagged (`temporary_url` / `extra.temporary_image_url`) and
+  the run logs a count -- if that count is non-zero, those links will die.
 - **`scrape_data/mycoast_pages.jsonl` is a cache, not unmerged work.** Unlike
   the crawl's JSONL it is never deleted; deleting it just costs ~30 min of
   requests against mycoast.org (≈7 s/page) on the next run.
@@ -340,12 +354,16 @@ News:
   was verified a field-for-field superset; they remain in git history.
 
 Government / public APIs (New York State):
-- `gis_flood_images.json`: 7,115 image rows -- MyCoast 3,006, Wikimedia Commons
+- `gis_flood_images.json`: 7,192 image rows -- MyCoast 3,083 (not deduped;
+  refreshed 2026-09-28), Wikimedia Commons
   2,120 (only 398 with coordinates), USGS STN 1,873, NAPSG 116. Everything but
   most Commons files has lat/lon. Not yet model-classified.
-- `mycoast.json` (after dedupe): 1,893 reports, 2,948 images, 994 reports in
-  NYC (Queens dominates, 745), 2011-05 to 2026-08. Flood Watch 1,734, Storm
-  Reporter 159. "What is Flooded": Roads/streets 1,039, Sidewalks 821,
+- `mycoast.json` (after dedupe, re-scraped 2026-09-28): 1,938 reports, 3,025
+  images, 2011-05 to 2026-09-28. The 2026-09-28 re-scrape added 45 reports / 77
+  images (all dated 2026-09-13 onward) and lost nothing. Before it: 1,893
+  reports, 2,948 images, 994 in NYC (Queens dominates, 745), Flood Watch 1,734,
+  Storm Reporter 159. `mycoast_meta_data.json` still describes the pre-re-scrape
+  state (it is hand-made, see Data flow). "What is Flooded": Roads/streets 1,039, Sidewalks 821,
   Lawns/vegetation 808, Structures 231, Parking lots 174. Every report has
   coordinates and a time. Not yet model-classified for street-view geometry.
 
