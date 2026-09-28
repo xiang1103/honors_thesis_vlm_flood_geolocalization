@@ -1,57 +1,57 @@
 {
-  "generated_at": "2026-09-24T19:27:43+00:00",
+  "generated_at": "2026-09-28T23:52:35+00:00",
   "source_file": "data/mycoast.json",
   "note": "One MyCoast report can carry several photos, so images > reports. in_nyc comes from the report's lat/lon (nyc_basis='coordinates' on every record); 'outside_nyc' reports are elsewhere in New York State. Dates are local_time; reports dated before 2000 are left out of earliest/latest and listed under odd_timestamps.",
   "all": {
-    "reports": 1893,
-    "images": 2948,
-    "reports_with_multiple_images": 655,
-    "images_in_multi_image_reports": 1710,
+    "reports": 1938,
+    "images": 3025,
+    "reports_with_multiple_images": 674,
+    "images_in_multi_image_reports": 1761,
     "mean_images_per_report": 1.56,
     "images_per_report": {
-      "1": 1238,
-      "2": 375,
-      "3": 178,
-      "4": 84,
+      "1": 1264,
+      "2": 386,
+      "3": 181,
+      "4": 89,
       "5": 18
     },
     "earliest": "2011-05-26",
-    "latest": "2026-08-29"
+    "latest": "2026-09-28"
   },
   "in_nyc": {
-    "reports": 994,
-    "images": 1569,
-    "reports_with_multiple_images": 386,
-    "images_in_multi_image_reports": 961,
-    "mean_images_per_report": 1.58,
+    "reports": 1013,
+    "images": 1592,
+    "reports_with_multiple_images": 389,
+    "images_in_multi_image_reports": 968,
+    "mean_images_per_report": 1.57,
     "images_per_report": {
-      "1": 608,
-      "2": 237,
-      "3": 115,
+      "1": 624,
+      "2": 239,
+      "3": 116,
       "4": 28,
       "5": 6
     },
     "earliest": "2012-10-22",
-    "latest": "2026-08-29"
+    "latest": "2026-09-28"
   },
   "outside_nyc": {
-    "reports": 899,
-    "images": 1379,
-    "reports_with_multiple_images": 269,
-    "images_in_multi_image_reports": 749,
-    "mean_images_per_report": 1.53,
+    "reports": 925,
+    "images": 1433,
+    "reports_with_multiple_images": 285,
+    "images_in_multi_image_reports": 793,
+    "mean_images_per_report": 1.55,
     "images_per_report": {
-      "1": 630,
-      "2": 138,
-      "3": 63,
-      "4": 56,
+      "1": 640,
+      "2": 147,
+      "3": 65,
+      "4": 61,
       "5": 12
     },
     "earliest": "2011-05-26",
-    "latest": "2026-08-11"
+    "latest": "2026-09-27"
   },
   "nyc_by_county": {
-    "Queens County, NY": 745,
+    "Queens County, NY": 764,
     "Bronx County, NY": 148,
     "Kings County, NY": 53,
     "NY": 22,
@@ -59,15 +59,15 @@
     "New York County, NY": 5
   },
   "outside_nyc_by_county": {
-    "Suffolk County, NY": 221,
+    "Suffolk County, NY": 239,
     "Wayne County, NY": 90,
     "Monroe County, NY": 84,
     "Dutchess County, NY": 71,
     "Ulster County, NY": 66,
     "Tompkins County, NY": 50,
+    "Westchester County, NY": 46,
     "Oswego County, NY": 43,
     "Onondaga County, NY": 39,
-    "Westchester County, NY": 38,
     "Jefferson County, NY": 36,
     "Orleans County, NY": 25,
     "Albany County, NY": 20,
@@ -96,8 +96,8 @@
     "Allegany County, NY": 1
   },
   "by_report_type": {
-    "Flood Watch": 1734,
-    "Storm Reporter": 159
+    "Flood Watch": 1770,
+    "Storm Reporter": 168
   },
   "duplicate_images_removed_by_scraper": 10,
   "odd_timestamps": [

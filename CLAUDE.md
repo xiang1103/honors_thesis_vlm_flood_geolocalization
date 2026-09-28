@@ -35,6 +35,111 @@ MyCoast's other state programs, 311-style flood complaint portals with photos,
 NWS/CoCoRaHS/mPING-style spotter reports, state DOT road-closure imagery,
 Mapillary. Do not spend effort extending the news crawler unless asked.
 
+## REQUIRED data format — match `data/mycoast.json` (owner's rule, 2026-09-28)
+
+**Any new data source, scraper, or rewrite of an existing one MUST write
+records in exactly the shape `data/mycoast.json` has as of 2026-09-28.** The
+data is used for web display, so the format is a contract, not a suggestion.
+Do not rename, drop, re-type, or re-nest fields; do not invent a parallel
+format "for now". If a source genuinely cannot fit, stop and ask the owner
+before writing anything -- do not decide the schema yourself.
+
+File: a JSON **list** of report objects, sorted newest first, written
+atomically (`.tmp` + fsync + `os.replace`), merged into existing rows, never
+overwritten wholesale.
+
+**One report object** (every key always present; use `null`, `{}` or `[]` when
+the source has no value -- never omit a key):
+
+| key | type | meaning |
+|---|---|---|
+| `report_id` | int | the source's own stable id for the report |
+| `source_url` | str | public page for the report |
+| `report_type` | str | the source's category (MyCoast: "Flood Watch" / "Storm Reporter") |
+| `title` | str | |
+| `county` | str | |
+| `place` | str | neighbourhood / locality |
+| `state` | str | two-letter |
+| `date_utc` | str | ISO 8601 with offset, UTC |
+| `local_time` | str | ISO 8601 with the local offset |
+| `local_time_text` | str | the time as the source displayed it |
+| `lat`, `lon` | float | WGS84; required -- a record without coordinates does not belong in this file |
+| `in_nyc` | bool | |
+| `nyc_basis` | str | how `in_nyc` was decided ("coordinates") |
+| `image_count` | int | `== len(images)` |
+| `images` | list | image objects, below; never empty (a report with no photo is dropped) |
+| `text` | str | all text fields joined, for search / text models |
+| `description` | str or null | the reporter's free text |
+| `submitted` | dict | the source's structured form answers, label -> str or list[str] |
+| `weather` | dict | label -> str |
+| `tide_stations` | list | `{station, water_level_at_report, distance}` |
+| `has_page_detail` | bool | whether the report page was fetched and parsed |
+| `api_fields` | dict | every raw field the source API returned, verbatim |
+| `page_fetched_at` | str or null | ISO 8601 |
+| `scraped_at` | str | ISO 8601 |
+| `duplicate_images` | list | OPTIONAL, added only by dedupe |
+
+**One image object:**
+
+| key | type | meaning |
+|---|---|---|
+| `image_url` | str | the PERMANENT full-size photo -- see displayability below |
+| `thumbnail_url` | str or null | a smaller rendition of the same photo, same rules |
+| `scaled_url` | str or null | another rendition, same rules |
+| `record_id` | str | `sha256(source_url + "\n" + image_url)[:24]` |
+| `image_sha256`, `image_dhash` | str | set by dedupe after a SUCCESSFUL fetch + decode |
+| `api_image_url` | str | OPTIONAL: the source's original URL when it was replaced by a permanent one |
+| `page_only`, `temporary_url` | bool | OPTIONAL flags, `true` only |
+
+**Every photo must be displayable in a browser.** Concretely, `image_url` (and
+`thumbnail_url` when set) must be:
+
+1. a direct link to the image FILE, not to a page, viewer or gallery;
+2. **permanent** -- never a staging, signed, expiring or session URL. MyCoast's
+   `blueurchin-reportimages` URLs looked fine and died within days; they are
+   resolved to the CDN before writing (see Gotchas). Check any new source for
+   the same behaviour by re-fetching a few URLs days apart;
+3. publicly fetchable: HTTP 200 with an `image/*` content type to a plain GET
+   with no cookies, login, API key, or referrer (the review site loads images
+   with `referrerPolicy = "no-referrer"`; a CDN that rejects hotlinks, like
+   AP's 403, fails this);
+4. in a format browsers decode: JPEG, PNG, WebP or GIF -- not TIFF, HEIC or RAW;
+5. a remote https URL -- never a local path or `data:` URI. Pixels are not
+   stored in the repo (see Licensing).
+
+Proof of the rule is `image_sha256`: dedupe only sets it after downloading and
+decoding the image. An image without it has NOT been shown to be displayable
+and must be treated as a defect to fix, not shipped. As of 2026-09-28 all
+3,025 images in `mycoast.json` have it. After any scrape, run the dedupe step
+(`./scraping/update_mycoast.sh` does) and check its `images with no digest`
+line is 0; if it is not, find out why before moving on.
+
+## REQUIRED: every scrape updates its metadata file (owner's rule, 2026-09-28)
+
+A metadata file is the dataset's published summary; a scrape that leaves it
+stale makes it wrong. So **any run that changes a data file must regenerate
+that file's metadata as part of the same run** -- not as a separate manual step
+someone has to remember, and never by hand-editing the JSON.
+
+| data file | metadata file | generated by | wired in |
+|---|---|---|---|
+| `data/mycoast.json` | `data/mycoast_meta_data.json` | `make_mycoast_metadata.py` | step 3 of `scraping/update_mycoast.sh` |
+| `data/news_scrape_results.json`, `data/verified_images_news.json` | `data/meta_data.json` | `make_metadata.py` | `refresh_quietly()` at the end of `scrape.py`, `verify_images_vlm.py`, `dedupe.py` |
+
+Rules:
+
+- Metadata is computed from the FINAL data file (after dedupe), never from a
+  scrape's own counters, so the numbers describe what is actually shipped.
+- A new data source gets a metadata generator (a `make_*_metadata.py` script
+  or a function), and its update path calls it. Add a row to the table above.
+- Running a scraper directly (e.g. `mycoast_scrape.py` without the wrapper)
+  leaves metadata stale; finish with the wrapper, or run the generator.
+- Metadata files are the tracked, committed record (`data/*` is gitignored
+  except them), so their key set is a format too: add keys, do not rename or
+  remove them without asking the owner.
+- `gis_flood_images.json` has NO metadata file yet. Adding one is open work,
+  and the rule applies once it exists.
+
 ## Git — do not commit or push
 
 **Never run `git commit` or `git push`.** The owner handles all commits and
@@ -75,6 +180,7 @@ local_vlm/        model mechanics      backend.py, download_model.py
 image_review_web/  + image_review_server.py   news review site (human + model)  :8765
 gis_review_web/    + gis_review_server.py     GIS/MyCoast review site           :8768
 make_metadata.py  writes data/meta_data.json (news dataset snapshot)
+make_mycoast_metadata.py  writes data/mycoast_meta_data.json (MyCoast snapshot)
 map_countries.py  country choropleth of the news corpus
 data/news_scrape_results.json   THE news corpus — source of truth for the news side
 data/gis_flood_images.json      all four API sources, one row per (page, image)
@@ -124,8 +230,9 @@ python3 scraping/api_based_scraping/mycoast_scrape.py                    # MyCoa
 python3 scraping/api_based_scraping/mycoast_scrape.py --no-pages         # API fields only, seconds
 python3 verification/dedupe_mycoast.py --dry-run
 python3 verification/dedupe_mycoast.py --apply    # re-run after every mycoast_scrape.py
-./scraping/update_mycoast.sh                     # ROUTINE MyCoast update: the three steps
-                                                  # in order: scrape -> dedupe -> gis refresh
+./scraping/update_mycoast.sh                     # ROUTINE MyCoast update, in order:
+                                                  # scrape -> dedupe -> metadata -> gis refresh
+python3 make_mycoast_metadata.py                  # data/mycoast_meta_data.json alone
 
 # review sites
 python3 image_review_server.py          # :8765 news, human labels + model answers
@@ -136,7 +243,7 @@ python3 gis_review_server.py            # :8768 GIS/MyCoast, reads gis_flood_ima
 pass `--port` to one of them if both are running.
 
 Long crawls: `./scraping/run_crawl.sh` (tmux, survives disconnect).
-MyCoast update: `./scraping/update_mycoast.sh` (scrape -> dedupe -> gis refresh,
+MyCoast update: `./scraping/update_mycoast.sh` (scrape -> dedupe -> metadata -> gis refresh,
 stops on first failure, log in `scrape_data/logs/mycoast-update_latest.log`).
 
 ## Data flow
@@ -182,14 +289,17 @@ mycoast_scrape.py  (ArcGIS layer + mycoast.org/reports/<id> pages) -->
         |                             image carries the same record_id as above,
         |                             so the two files join
 dedupe_mycoast.py -->  same file, exact-duplicate images and image-less reports dropped
+make_mycoast_metadata.py -->
     data/mycoast_meta_data.json       counts snapshot (tracked in git)
+ad-hoc, not in the repo -->
     data/mycoast_points.csv           one row per report, lat/lon for plotting
     data/map_view/mycoast_ny_map.html point map of NY reports
 ```
 
-`mycoast_meta_data.json`, `mycoast_points.csv` and `mycoast_ny_map.html` were
-produced by hand / ad-hoc code that is NOT in the repo. If they need
-regenerating, write a script rather than repeating it by hand.
+`mycoast_points.csv` and `mycoast_ny_map.html` were produced by ad-hoc code
+that is NOT in the repo. If they need regenerating, write a script rather than
+repeating it by hand. (`mycoast_meta_data.json` was too, until
+`make_mycoast_metadata.py`, which reproduces it field for field.)
 
 Scope of the API scrapers: New York State only (Census TIGER boundary, state
 waters included), `in_nyc` labels the five boroughs. MyCoast is limited to
@@ -364,8 +474,8 @@ Government / public APIs (New York State):
   images, 2011-05 to 2026-09-28. The 2026-09-28 re-scrape added 45 reports / 77
   images (all dated 2026-09-13 onward) and lost nothing. Before it: 1,893
   reports, 2,948 images, 994 in NYC (Queens dominates, 745), Flood Watch 1,734,
-  Storm Reporter 159. `mycoast_meta_data.json` still describes the pre-re-scrape
-  state (it is hand-made, see Data flow). "What is Flooded": Roads/streets 1,039, Sidewalks 821,
+  Storm Reporter 159. Now 1,013 reports in NYC; `mycoast_meta_data.json` is
+  current. "What is Flooded" (pre-re-scrape): Roads/streets 1,039, Sidewalks 821,
   Lawns/vegetation 808, Structures 231, Parking lots 174. Every report has
   coordinates and a time. Not yet model-classified for street-view geometry.
 
@@ -461,8 +571,9 @@ Priority is MyCoast and MyCoast-like sources (owner's direction, 2026-09-28).
 3. Find more MyCoast-like sources: structured API, per-record GPS + time,
    ground-level citizen/agency photos (311 flood complaints, spotter reports,
    DOT road-closure cameras, Mapillary). Probe dashcam/YouTube as well.
-4. Put the MyCoast derivatives (`mycoast_meta_data.json`, `mycoast_points.csv`,
-   `mycoast_ny_map.html`) behind a script; they are currently hand-made.
+4. Put the remaining MyCoast derivatives (`mycoast_points.csv`,
+   `mycoast_ny_map.html`) behind a script; they are still ad-hoc. Add a
+   metadata file for `gis_flood_images.json`.
 5. Near-duplicate detection with a signal that works.
 6. Build a small hand-labelled ground-truth set (:8765 / :8768 export
    decisions) so model and prompt changes can be measured instead of guessed.

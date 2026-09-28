@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 #
-# Bring the MyCoast data up to date: scrape, dedupe, refresh the review site.
+# Bring the MyCoast data up to date: scrape, dedupe, metadata, review site.
 #
 #   ./scraping/update_mycoast.sh                   # the routine update
 #   ./scraping/update_mycoast.sh --refresh-pages   # extra args go to mycoast_scrape.py
@@ -15,7 +15,9 @@
 #                                 ones, which restores every duplicate image and
 #                                 photo-less report the last dedupe removed --
 #                                 so this must follow every scrape
-#   3. gis_scrape.py --sources mycoast
+#   3. make_mycoast_metadata.py   data/mycoast_meta_data.json from the deduped
+#                                 file -- REQUIRED after every scrape (CLAUDE.md)
+#   4. gis_scrape.py --sources mycoast
 #                                 the :8768 review site reads gis_flood_images.json,
 #                                 not mycoast.json. Runs after step 1 so its
 #                                 temporary-URL fix reads the fresh page cache.
@@ -43,16 +45,19 @@ exec > >(tee "$LOG") 2>&1
 
 step() { echo; echo "=== $* ($(date '+%F %T')) ==="; }
 
-step "1/3 scrape MyCoast"
+step "1/4 scrape MyCoast"
 "$PY" scraping/api_based_scraping/mycoast_scrape.py "$@"
 
-step "2/3 dedupe"
+step "2/4 dedupe"
 "$PY" verification/dedupe_mycoast.py --apply
 
+step "3/4 metadata"
+"$PY" make_mycoast_metadata.py
+
 if [ "${SKIP_GIS:-0}" = "1" ]; then
-    step "3/3 review-site data SKIPPED (SKIP_GIS=1)"
+    step "4/4 review-site data SKIPPED (SKIP_GIS=1)"
 else
-    step "3/3 refresh MyCoast rows in gis_flood_images.json"
+    step "4/4 refresh MyCoast rows in gis_flood_images.json"
     "$PY" scraping/api_based_scraping/gis_scrape.py --sources mycoast
 fi
 
