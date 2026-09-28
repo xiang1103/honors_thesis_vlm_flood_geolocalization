@@ -1,7 +1,15 @@
 # Program Flow 
 
-Collect flood news articles with captioned images from 29 news outlets, then
-filter the images down to usable street-level photographs — by model and by eye.
+Collect street-level flood photographs, then filter them down to usable
+street-view images — by model and by eye. Two collection techniques:
+
+1. **News outlets** — crawl 29 outlets for flood articles with captioned images (sections 1-3).
+2. **Government / public APIs** — MyCoast, USGS STN, Wikimedia Commons, NAPSG,
+   New York State for now; records carry coordinates and timestamps (sections 4-5).
+
+> **Current focus: keep collecting MyCoast data, or data like it** — citizen/agency
+> flood reports from a structured API, with GPS + time per photo and cameras at
+> street level. News is kept as a supplement and is not being extended.
 
 ```
 scrape ──► data/news_scrape_results.json ──► Text matching to find flood news + VLM to verify which images are good ──► data/verified_images_news.json
@@ -109,9 +117,38 @@ python3 gis_review_server.py                     # http://127.0.0.1:8768
 python3 gis_review_server.py --port 8770         # if 8768 is taken
 ```
 
+## 5. MyCoast in depth
+
+`gis_scrape.py` keeps only the fields the four sources share. `mycoast_scrape.py`
+goes deeper on MyCoast alone: every ArcGIS field, plus each report's page on
+mycoast.org, which has what the API lacks — **"What is Flooded"**
+(Roads/streets, Sidewalks, Parking lots, ...), the reporter's description, exact
+local time, weather and nearby tide-station readings.
+
+```
+mycoast_scrape.py ──► data/mycoast.json ──► dedupe_mycoast.py (same file)
+   (page cache: scrape_data/mycoast_pages.jsonl, kept so re-runs are free)
+```
+
+One row per report, images nested; each image has the same `record_id` as in
+`gis_flood_images.json`, so the two files join. Scope: NY, report types Flood
+Watch + Storm Reporter.
+
+```bash
+python3 scraping/api_based_scraping/mycoast_scrape.py              # ~30 min first time (pages)
+python3 scraping/api_based_scraping/mycoast_scrape.py --no-pages   # API fields only, seconds
+python3 verification/dedupe_mycoast.py --dry-run
+python3 verification/dedupe_mycoast.py --apply                     # re-run after every scrape
+```
+
+Current (2026-09-24, `data/mycoast_meta_data.json`): 1,893 reports, 2,948 images,
+994 reports in NYC, 2011–2026. Also `data/mycoast_points.csv` (one row per
+report, for plotting) and `data/map_view/mycoast_ny_map.html`.
+
 ## Open map view 
 ```bash 
-python3 map_countries.py 
+python3 map_countries.py            # country map of the news corpus
+python3 map_countries.py --serve    # also defaults to :8768 -- use --serve <port> if the GIS site is running
 ```
 
 
@@ -119,6 +156,9 @@ python3 map_countries.py
 ## Future Designs 
 
 **Get Street Images:** 
+- more MyCoast: other states' programs, other report types
+- other MyCoast-like sources: 311 flood complaints with photos, spotter reports, DOT road cameras, Mapillary
+- run the street-view VLM prompt over MyCoast / GIS images (the verifier only reads the news corpus today)
 - if we can find out reports of where flood has happened, use Google Maps API to find the street-view image for that time 
 - Flickr API 
 

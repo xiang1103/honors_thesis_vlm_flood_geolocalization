@@ -10,9 +10,30 @@ simply to collect images with street-view *geometry*. That is a deliberate
 scope decision by the owner, with a known cost recorded under "Dataset
 direction" below.
 
-The existing pipeline (crawl news -> classify images) was built before this was
-settled and is being re-evaluated against it. Do not assume the news corpus is
-the intended final source.
+## Current focus (owner's decision, 2026-09-28) — MyCoast and sources like it
+
+There are two collection techniques in the repo:
+
+1. **News outlets** -- HTML crawl of 29 outlets (`scraping/scrape.py`). Built
+   first; measured low yield for street-view geometry (see "Dataset
+   direction"). Kept as a supplement, not being extended.
+2. **Government / public APIs** -- documented ArcGIS and open-data endpoints
+   (`scraping/api_based_scraping/gis_scrape.py`, `mycoast_scrape.py`):
+   MyCoast, USGS STN, Wikimedia Commons, NAPSG PhotoMappers, all New York
+   State for now.
+
+**The owner wants to keep focusing on MyCoast data, or data like it.** MyCoast
+is the best source found so far: citizen flood reports taken on foot or from a
+car, so the camera is usually at street level; every report has coordinates
+and a timestamp; and the reporter states "What is Flooded" (Roads/streets is
+the top answer, 1,039 of 1,893 reports), which pre-filters for street scenes
+better than any caption. When proposing new work, prefer (a) getting more out
+of MyCoast -- other states, other report types, re-scrapes -- and (b) finding
+other sources with the same properties: citizen/agency reports, structured
+API, per-record GPS + time, photos taken at ground level. Examples to probe:
+MyCoast's other state programs, 311-style flood complaint portals with photos,
+NWS/CoCoRaHS/mPING-style spotter reports, state DOT road-closure imagery,
+Mapillary. Do not spend effort extending the news crawler unless asked.
 
 ## Git — do not commit or push
 
@@ -42,18 +63,28 @@ disk pressure without checking the absolute number first.
 ## Layout
 
 ```
-scraping/         crawling only        scrape.py, adapters.py, run_crawl.sh, design.md
-  api_based_scraping/   superseded GDELT approach: news_scrape.py + news_api_design.md
+scraping/         news crawl           scrape.py, adapters.py, run_crawl.sh, design.md, export.py
+  api_based_scraping/   government/public APIs (ACTIVE): gis_scrape.py, mycoast_scrape.py
+                        superseded GDELT news discovery: news_scrape.py + news_api_design.md
 verification/     judging only         verify_text.py, verify_images_vlm.py, dedupe.py
+                  MyCoast              dedupe_mycoast.py
+                  New York subset      filter_nyc.py  (news -> nyc_scraped_images.json)
                   country pass         locate_articles.py, country_codes.py, make_iso_table.py,
                                        compile_countries.py
 local_vlm/        model mechanics      backend.py, download_model.py
-image_review_web/       + image_review_server.py       human review site  :8765
-image_vlm_review_web/   + image_vlm_review_server.py   model results site :8766
-data/news_scrape_results.json   THE corpus — source of truth, what everything reads
+image_review_web/  + image_review_server.py   news review site (human + model)  :8765
+gis_review_web/    + gis_review_server.py     GIS/MyCoast review site           :8768
+make_metadata.py  writes data/meta_data.json (news dataset snapshot)
+map_countries.py  country choropleth of the news corpus
+data/news_scrape_results.json   THE news corpus — source of truth for the news side
+data/gis_flood_images.json      all four API sources, one row per (page, image)
+data/mycoast.json               MyCoast in depth, one row per REPORT, images nested
 scrape_data/      ALL intermediates: per-outlet .jsonl, the verifier's .jsonl,
-                  crawl logs. Gitignored; recreated by makedirs.
+                  mycoast_pages.jsonl (page cache), crawl logs. Gitignored.
 ```
+
+The old model-results site (:8766, `image_vlm_review_server.py`) was merged
+into :8765 and no longer exists.
 
 `scraping/design.md` is the outlet bake-off record: which outlets were
 tested, which were rejected and why, and postmortems of real bugs. Read it
@@ -86,10 +117,21 @@ python3 verification/verify_text.py data/news_scrape_results.json
 python3 verification/dedupe.py --dry-run
 python3 verification/dedupe.py --apply            # --drop-near is UNSAFE, see below
 
+# government / public APIs (no GPU)
+python3 scraping/api_based_scraping/gis_scrape.py                        # all 4 sources, ~8 min
+python3 scraping/api_based_scraping/gis_scrape.py --sources mycoast,stn  # subset; others' rows kept
+python3 scraping/api_based_scraping/mycoast_scrape.py                    # MyCoast in depth + report pages
+python3 scraping/api_based_scraping/mycoast_scrape.py --no-pages         # API fields only, seconds
+python3 verification/dedupe_mycoast.py --dry-run
+python3 verification/dedupe_mycoast.py --apply    # re-run after every mycoast_scrape.py
+
 # review sites
-python3 image_review_server.py          # :8765 human labelling, reads the corpus
-python3 image_vlm_review_server.py      # :8766 model results, reads final.json
+python3 image_review_server.py          # :8765 news, human labels + model answers
+python3 gis_review_server.py            # :8768 GIS/MyCoast, reads gis_flood_images.json
 ```
+
+`gis_review_server.py` and `map_countries.py --serve` both default to :8768;
+pass `--port` to one of them if both are running.
 
 Long crawls: `./scraping/run_crawl.sh` (tmux, survives disconnect).
 
@@ -119,6 +161,37 @@ map_countries.py -->
                                       counts match what is drawn, and the cut
                                       is written into the map's own title
 ```
+
+Government / public API side (independent of the news corpus):
+
+```
+gis_scrape.py  (mycoast | stn | commons | napsg) -->
+    data/gis_flood_images.json        one row per (source page, image),
+        |                             record_id = sha256(source_url \n image_url)[:24];
+        |                             merged per source, not overwritten
+    gis_review_server.py :8768        browse + human labels (localStorage)
+
+mycoast_scrape.py  (ArcGIS layer + mycoast.org/reports/<id> pages) -->
+    scrape_data/mycoast_pages.jsonl   parsed-page cache, KEPT after the run
+        |                             (it is what makes a re-run free, ~30 min otherwise)
+    data/mycoast.json                 one row per REPORT, images nested; each
+        |                             image carries the same record_id as above,
+        |                             so the two files join
+dedupe_mycoast.py -->  same file, exact-duplicate images and image-less reports dropped
+    data/mycoast_meta_data.json       counts snapshot (tracked in git)
+    data/mycoast_points.csv           one row per report, lat/lon for plotting
+    data/map_view/mycoast_ny_map.html point map of NY reports
+```
+
+`mycoast_meta_data.json`, `mycoast_points.csv` and `mycoast_ny_map.html` were
+produced by hand / ad-hoc code that is NOT in the repo. If they need
+regenerating, write a script rather than repeating it by hand.
+
+Scope of the API scrapers: New York State only (Census TIGER boundary, state
+waters included), `in_nyc` labels the five boroughs. MyCoast is limited to
+`State = 'NY'` and report types `Flood Watch` + `Storm Reporter`
+(`STATE`/`REPORT_TYPES` in `mycoast_scrape.py`). The report page's byline
+names a private individual and is deliberately NOT collected.
 
 Supporting files: `data/image_hashes.json` (fingerprint cache, makes dedupe
 re-runs instant), `/home/liu47/models/Qwen3.8-27B` (weights,
@@ -227,29 +300,54 @@ blocks and takes the LAST match. Thinking off is also ~10x faster
   key. There is no server-side copy.
 - **Line endings.** Files written on Windows land as CRLF and flap the whole
   diff when rewritten here. Consider `*.json text eol=lf` in `.gitattributes`.
-- **`scraping/api_based_scraping/`** is the superseded GDELT-discovery
-  approach. Its design notes are in `news_api_design.md` (formerly a nested
-  `CLAUDE.md`, renamed so it stops being read as agent instructions). The
-  reasoning on why no news API returns inline images is still worth reading;
-  the code is not in use.
+- **`scraping/api_based_scraping/` holds two different things.**
+  `gis_scrape.py` and `mycoast_scrape.py` are the ACTIVE government/public-API
+  scrapers. `news_scrape.py` is the superseded GDELT news-discovery approach;
+  its notes are in `news_api_design.md` (formerly a nested `CLAUDE.md`, renamed
+  so it stops being read as agent instructions). The reasoning on why no news
+  API returns inline images is still worth reading; that code is not in use.
+- **A MyCoast re-scrape restores deduped images.** `mycoast_scrape.py` merges
+  fresh reports OVER existing ones, so run `dedupe_mycoast.py --apply` after
+  every scrape (cheap: fingerprints are cached in `data/image_hashes.json`,
+  shared with `dedupe.py`).
+- **MyCoast image URLs come in renditions.** The API lists resized thumbnails
+  (`-300x225.jpg`); the page links WordPress's `-scaled` copy; the original has
+  neither suffix. They are different bytes of the SAME photo --
+  `photo_identity()` collapses them. `image_url` is always the original.
+- **`scrape_data/mycoast_pages.jsonl` is a cache, not unmerged work.** Unlike
+  the crawl's JSONL it is never deleted; deleting it just costs ~30 min of
+  requests against mycoast.org (≈7 s/page) on the next run.
+- **35 MyCoast reports have pre-2000 timestamps** (e.g. 1935); listed under
+  `odd_timestamps` in `mycoast_meta_data.json`. Treat their dates as unknown.
 
-## State (2026-09-11)
+## State (2026-09-28)
 
 ```
-data/news_scrape_results.json      22M   the corpus
-data/verified_images_news.json  15M   image labels
-data/image_hashes.json           2.0M   fingerprint cache for dedupe
+data/news_scrape_results.json    53M   news corpus
+data/verified_images_news.json   27M   news image labels
+data/image_hashes.json          5.3M   fingerprint cache (dedupe.py + dedupe_mycoast.py)
+data/gis_flood_images.json      7.4M   4 API sources, NY State
+data/mycoast.json               7.9M   MyCoast NY, per report
 ```
 
-- Corpus: 5,892 articles, 8,679 images, 29 outlets. ~1,870 articles have no
-  images and so appear in no verification output.
+News:
+- Corpus: 11,219 articles, 18,273 images, 28 outlets (2012-06 to 2026-09);
+  8,681 articles carry images. Per `data/meta_data.json` (2026-09-14).
+- Classified: 12,611 image rows, ALL under the strict street-view prompt (one
+  distinct prompt). 4,063 `yes` (32%) -- in line with the 20-40% predicted
+  below. The mixed-prompt state described in older notes is gone.
 - The 29 per-outlet `*_flood.json` were deleted once the corpus
   was verified a field-for-field superset; they remain in git history.
-- Classified: ~8,638 rows, ~66% `yes` under the street-level prompt.
-- 1,624 rows (`cbs` 1,456, `fox` 110, `npr` 27, `ap` 23, `nbc` 6, `cnn` 2)
-  still carry the OLD flood-footage prompt, where `yes` meant visible water.
-  Mixing them with street-level rows blends two definitions.
-- 12 images are permanently unfetchable (dead URLs); they stay pending.
+
+Government / public APIs (New York State):
+- `gis_flood_images.json`: 7,115 image rows -- MyCoast 3,006, Wikimedia Commons
+  2,120 (only 398 with coordinates), USGS STN 1,873, NAPSG 116. Everything but
+  most Commons files has lat/lon. Not yet model-classified.
+- `mycoast.json` (after dedupe): 1,893 reports, 2,948 images, 994 reports in
+  NYC (Queens dominates, 745), 2011-05 to 2026-08. Flood Watch 1,734, Storm
+  Reporter 159. "What is Flooded": Roads/streets 1,039, Sidewalks 821,
+  Lawns/vegetation 808, Structures 231, Parking lots 174. Every report has
+  coordinates and a time. Not yet model-classified for street-view geometry.
 
 ## Dataset direction (2026-09-13) — READ BEFORE EXTENDING THE SCRAPER
 
@@ -277,11 +375,15 @@ image here. **A caption saying "street" describes the EVENT, not the camera.**
 Do not infer street-view geometry from caption text; it was wrong when tried.
 
 Expect roughly 20-40% of what the current filter accepts to be usable, i.e.
-~1,600-2,800 of 8,044. Run the strict prompt below over the existing corpus to
-get the real number before scraping more news.
+~1,600-2,800 of 8,044. Measured since: the strict prompt below accepts 32%
+(4,063 of 12,611) of the now-larger news set.
 
 **Sources where the geometry is guaranteed, not filtered for:**
 
+0. **MyCoast** (in use, the current focus -- see top of file) -- citizen
+   reports with GPS + time and a self-reported "What is Flooded"; mostly
+   ground-level phone photos. Not guaranteed street-view, but far closer than
+   news, and every image is geolocated, so it can serve as ground truth.
 1. **Dashcam / drive-through-flood video** (YouTube etc.) -- camera at vehicle
    height, road filling the frame, facades passing. Structurally the same
    geometry as Street View, which is itself car-mounted. Many usable frames
@@ -297,9 +399,9 @@ and captions and never pixels -- keep it that way and news stays usable;
 shipping JPEGs in a release would be infringement. Wikimedia Commons and
 CC-filtered Flickr are the sources where pixels CAN be redistributed.
 
-**Proposed prompt** (not yet applied; `PROMPT` in
-`verification/verify_images_vlm.py:50` still selects any ground-level photo and
-explicitly does not require flooding):
+**Street-view prompt** (APPLIED to the whole news set as of 2026-09-14; it is
+`PROMPT` in `verification/verify_images_vlm.py`, and does not require visible
+flooding):
 
 > Does this photograph look like a street-level view of a road or street,
 > similar to Google Street View? Answer yes only if ALL of the following hold:
@@ -314,8 +416,9 @@ explicitly does not require flooding):
 > chart, diagram, or graphic.
 
 Whether to also require visible flooding is undecided -- one clause either way.
-Applying it means clearing existing rows so they read as pending (resume is
-prompt-agnostic), ~95 min of free GPU for all 8,044.
+Changing it means clearing existing rows so they read as pending (resume is
+prompt-agnostic). The verifier reads only the news corpus; MyCoast/GIS images
+have not been run through it.
 
 **The cost of skipping coordinates.** They cannot be retrofitted: a news photo
 with no GPS will never become a geolocalization training example. Uncoordinated
@@ -326,9 +429,21 @@ small and hand-labelled.
 
 ## Open work
 
-1. Apply the strict street-view prompt above and re-score; measure real yield.
-2. Probe dashcam/YouTube frame extraction and Mapillary coverage as sources.
-3. Near-duplicate detection with a signal that works.
-4. `:8766` site still says "Flood image results / Kept by model"; relabel.
-5. Build a small hand-labelled ground-truth set (the :8765 site exports
+Priority is MyCoast and MyCoast-like sources (owner's direction, 2026-09-28).
+
+1. Run the street-view prompt over MyCoast images (and the other GIS sources);
+   the verifier currently reads only the news corpus, so it needs an input
+   path for `mycoast.json` / `gis_flood_images.json`. Measure real yield,
+   and check whether "What is Flooded = Roads/streets" predicts it.
+2. Widen MyCoast: other states' programs (drop `State = 'NY'`), and decide
+   whether other report types are wanted. Check terms of use before bulk
+   collection outside NY.
+3. Find more MyCoast-like sources: structured API, per-record GPS + time,
+   ground-level citizen/agency photos (311 flood complaints, spotter reports,
+   DOT road-closure cameras, Mapillary). Probe dashcam/YouTube as well.
+4. Put the MyCoast derivatives (`mycoast_meta_data.json`, `mycoast_points.csv`,
+   `mycoast_ny_map.html`) behind a script; they are currently hand-made.
+5. Near-duplicate detection with a signal that works.
+6. Build a small hand-labelled ground-truth set (:8765 / :8768 export
    decisions) so model and prompt changes can be measured instead of guessed.
+   MyCoast's coordinates make it the natural geolocalization evaluation set.
