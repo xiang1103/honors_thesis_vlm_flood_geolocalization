@@ -21,6 +21,12 @@ There are two collection techniques in the repo:
    (`scraping/api_based_scraping/gis_scrape.py`, `mycoast_scrape.py`):
    MyCoast, USGS STN, Wikimedia Commons, NAPSG PhotoMappers, all New York
    State for now.
+3. **Videos** (from 2026-10-05) -- YouTube Data API v3 first. Collected for
+   flood RELEVANCE, not coordinates; New York is labelled when it can be
+   inferred. `scraping/video_scraping/youtube_scrape.py`; format: "REQUIRED
+   data format for VIDEOS"; design: `scraping/video_scraping/design.md`.
+   Written 2026-10-05, not yet run against the live API (needs
+   `YOUTUBE_API_KEY` in `.env`).
 
 **The owner wants to keep focusing on MyCoast data, or data like it.** MyCoast
 is the best source found so far: citizen flood reports taken on foot or from a
@@ -35,9 +41,14 @@ MyCoast's other state programs, 311-style flood complaint portals with photos,
 NWS/CoCoRaHS/mPING-style spotter reports, state DOT road-closure imagery,
 Mapillary. Do not spend effort extending the news crawler unless asked.
 
-## REQUIRED data format — match `data/mycoast.json` (owner's rule, 2026-09-28)
+## REQUIRED data format for STATIC IMAGES — match `data/mycoast.json` (owner's rule, 2026-09-28; scoped to images 2026-10-05)
 
-**Any new data source, scraper, or rewrite of an existing one MUST write
+This contract covers sources whose unit is a **photo** (a report, page or post
+carrying still images). **Video sources have their own contract** -- see
+"REQUIRED data format for VIDEOS" below; do not force a video into this shape
+and do not apply this section's coordinate requirement to videos.
+
+**Any new static-image source, scraper, or rewrite of an existing one MUST write
 records in exactly the shape `data/mycoast.json` has as of 2026-09-28.** The
 data is used for web display, so the format is a contract, not a suggestion.
 Do not rename, drop, re-type, or re-nest fields; do not invent a parallel
@@ -114,6 +125,108 @@ and must be treated as a defect to fix, not shipped. As of 2026-09-28 all
 (`./scraping/update_mycoast.sh` does) and check its `images with no digest`
 line is 0; if it is not, find out why before moving on.
 
+## REQUIRED data format for VIDEOS (owner's rule, 2026-10-05)
+
+Video sources (YouTube first) are collected for **flood relevance, not
+coordinates**. The goal is videos that show flooding; knowing they are from
+New York is a bonus that is labelled, never required. Coordinates are kept when
+the source gives them and otherwise `null` -- a video is NOT dropped for lacking
+them, and a video whose location can never be set (most of them) is still
+kept. This is the deliberate difference from the static-image contract.
+
+File: `data/<source>_videos.json` (YouTube: `data/youtube_videos.json`), a JSON
+**list** of video objects, sorted newest first by `published_utc`, written
+atomically (`.tmp` + fsync + `os.replace`), merged into existing rows, never
+overwritten wholesale. Same write discipline as `mycoast.json`. As with images,
+if a source genuinely cannot fit, stop and ask the owner -- do not fork the
+schema.
+
+**One video object** (every key always present; `null`, `{}` or `[]` when
+absent -- never omit a key):
+
+| key | type | meaning |
+|---|---|---|
+| `video_id` | str | the source's own stable id (YouTube: the 11-char id). Strings are fine here |
+| `record_id` | str | `sha256(source_url)[:24]` -- identity for resume and joins |
+| `source` | str | `"youtube"`, ... |
+| `source_url` | str | public watch page (`https://www.youtube.com/watch?v=<id>`) |
+| `embed_url` | str | player URL for the review site (`https://www.youtube-nocookie.com/embed/<id>`) |
+| `title` | str | |
+| `description` | str | verbatim, may be `""` |
+| `tags` | list[str] | uploader tags |
+| `channel_id`, `channel_title` | str | |
+| `published_utc` | str | ISO 8601 UTC, when uploaded |
+| `recording_date` | str or null | ISO 8601, only if the uploader set one |
+| `duration_s` | int | |
+| `category_id` | str | YouTube category (e.g. `"25"` News & Politics) |
+| `language` | str or null | `defaultAudioLanguage` / `defaultLanguage` |
+| `license` | str | `"youtube"` or `"creativeCommon"` |
+| `thumbnails` | list | image objects in the static-image shape (`image_url`, `thumbnail_url`, `scaled_url`, `record_id`, `image_sha256`, `image_dhash`), so the displayability rules and dedupe apply unchanged. The cover first, then auto-frames `hq1`-`hq3`; only thumbnails that decoded are listed, so may be `[]` |
+| `lat`, `lon` | float or null | only from the source's own location metadata (`recordingDetails.location`) or a burned-in dashcam GPS overlay -- never invented from a place name |
+| `location_basis` | str or null | `"api"`, `"overlay_ocr"`, or `null` |
+| `in_ny` | bool or null | `null` = unknown, which is the common case and is NOT the same as `false` |
+| `in_nyc` | bool or null | same |
+| `ny_basis` | list[str] | every signal that fired: `"coordinates"`, `"gazetteer"`, `"channel"`, `"event_date"` (`"visual"` reserved) |
+| `ny_places` | list[str] | the place names matched, e.g. `["Hollis", "Queens"]` |
+| `flood_text_score` | float | signal 1, 0.0-1.0 (see below) |
+| `flood_text_hits` | dict | `{strong, weak, negative, soft_negative}` -> list of matched terms, so a score can be audited |
+| `flood_event_date` | str or null | signal 2: the known NY flood day (`YYYY-MM-DD`) this video was recorded/uploaded within 3 days after |
+| `flood_visual` | dict or null | signal 3, filled by the verifier: per-thumbnail answers + the aggregate. `null` = not yet classified |
+| `queries` | list[str] | label of every search that returned this video (provenance; also measures which queries pay) |
+| `text` | str | title + description + tags joined, for search / text models |
+| `available` | bool | the video was public and embeddable at `checked_at` |
+| `checked_at` | str | ISO 8601, last time availability was confirmed |
+| `api_fields` | dict | every raw field the API returned, verbatim |
+| `scraped_at` | str | ISO 8601 |
+
+Field order is `VIDEO_FIELDS` in `youtube_scrape.py`.
+
+**Every video must be playable in a browser**, the video counterpart of the
+displayability rule: `status.privacyStatus == "public"`, `status.embeddable ==
+true`, and not age-restricted (`contentDetails.contentRating.ytRating`), so the
+review site's `embed_url` iframe plays it. Videos disappear (deleted, made
+private) -- a re-scrape re-checks `available` and never deletes the row, so the
+labels already spent on it survive. Thumbnails use YouTube's `i.ytimg.com` URLs
+(the cover as the API lists it, and the auto-frames `hq1.jpg`-`hq3.jpg` with
+`1.jpg`-`3.jpg` as their `thumbnail_url`), which meet the five static-image
+rules. The scraper fetches and fingerprints every one (shared
+`data/image_hashes.json`) and keeps only those that decode, so every listed
+thumbnail has `image_sha256`; the metadata's `thumbnails_without_digest` must
+be 0. A missing `maxresdefault.jpg` answers 404 with a grey `image/jpeg`
+placeholder -- a content-type check alone would accept it.
+
+**No video bytes, ever.** Not in the repo and not on disk as a pipeline step:
+downloading (yt-dlp etc.) is against YouTube's Terms of Service, and the
+licensing argument under "Dataset direction" applies equally. Everything the
+pipeline needs -- metadata, thumbnails, the embed -- comes through the API and
+public thumbnail URLs.
+
+**Labels, not filters** -- as with the news verifiers. A video that scores 0,
+has no coordinates, or has `in_ny = null` is still written with its labels; the
+cut is a threshold applied by the reader. The only videos that never reach the
+file are NEW ones failing playability (counted in the run log).
+
+## Videos: how flood relevance and New York are decided
+
+Full reasoning, measurements and open questions:
+**`scraping/video_scraping/design.md`** -- read it before changing the search
+plan or `video_signals.py`. In short:
+
+- YouTube has no "flood" filter. `search.list` costs 100 of the 10,000 daily
+  quota units; `videos.list` is 1 unit per 50 ids. The search plan aims at New
+  York (event date windows, geo circles, flood term x NY place); every search
+  answer is cached in `scrape_data/youtube_searches.jsonl` the moment it
+  arrives.
+- Flood relevance is three independent signals, none a filter: (1) text --
+  `flood_text_score`, `verify_text.py`'s vocabulary plus video terms, hard
+  negatives (games, CG, trailers, insurance...) zero it; (2) `flood_event_date`
+  -- upload within 3 days after a known NY flood; (3) `flood_visual` -- the VLM
+  over the thumbnails (not built yet). Text says ABOUT a flood; only frames say
+  VISIBLE.
+- New York: coordinates if set, else place names (ambiguous ones like
+  Queens / Rochester / every MyCoast place need a NY marker), else NY channel;
+  `false` only on evidence of elsewhere; otherwise `null`.
+
 ## REQUIRED: every scrape updates its metadata file (owner's rule, 2026-09-28)
 
 A metadata file is the dataset's published summary; a scrape that leaves it
@@ -125,6 +238,7 @@ someone has to remember, and never by hand-editing the JSON.
 |---|---|---|---|
 | `data/mycoast.json` | `data/mycoast_meta_data.json` | `make_mycoast_metadata.py` | step 3 of `scraping/update_mycoast.sh` |
 | `data/news_scrape_results.json`, `data/verified_images_news.json` | `data/meta_data.json` | `make_metadata.py` | `refresh_quietly()` at the end of `scrape.py`, `verify_images_vlm.py`, `dedupe.py` |
+| `data/youtube_videos.json` | `data/youtube_videos_meta_data.json` | `make_youtube_metadata.py` | `refresh()` at the end of `youtube_scrape.py` |
 
 Rules:
 
@@ -171,6 +285,7 @@ disk pressure without checking the absolute number first.
 scraping/         news crawl           scrape.py, adapters.py, run_crawl.sh, design.md, export.py
   api_based_scraping/   government/public APIs (ACTIVE): gis_scrape.py, mycoast_scrape.py
                         superseded GDELT news discovery: news_scrape.py + news_api_design.md
+  video_scraping/       videos (ACTIVE): youtube_scrape.py, video_signals.py, design.md
 verification/     judging only         verify_text.py, verify_images_vlm.py, dedupe.py
                   MyCoast              dedupe_mycoast.py
                   New York subset      filter_nyc.py  (news -> nyc_scraped_images.json)
@@ -181,10 +296,12 @@ image_review_web/  + image_review_server.py   news review site (human + model)  
 gis_review_web/    + gis_review_server.py     GIS/MyCoast review site           :8768
 make_metadata.py  writes data/meta_data.json (news dataset snapshot)
 make_mycoast_metadata.py  writes data/mycoast_meta_data.json (MyCoast snapshot)
+make_youtube_metadata.py  writes data/youtube_videos_meta_data.json (called by youtube_scrape.py)
 map_countries.py  country choropleth of the news corpus
 data/news_scrape_results.json   THE news corpus — source of truth for the news side
 data/gis_flood_images.json      all four API sources, one row per (page, image)
 data/mycoast.json               MyCoast in depth, one row per REPORT, images nested
+data/youtube_videos.json        YouTube, one row per VIDEO, thumbnails nested
 scrape_data/      ALL intermediates: per-outlet .jsonl, the verifier's .jsonl,
                   mycoast_pages.jsonl (page cache), crawl logs. Gitignored.
 ```
@@ -233,6 +350,13 @@ python3 verification/dedupe_mycoast.py --apply    # re-run after every mycoast_s
 ./scraping/update_mycoast.sh                     # ROUTINE MyCoast update, in order:
                                                   # scrape -> dedupe -> metadata -> gis refresh
 python3 make_mycoast_metadata.py                  # data/mycoast_meta_data.json alone
+
+# videos (no GPU; needs YOUTUBE_API_KEY in .env or the environment)
+python3 scraping/video_scraping/youtube_scrape.py --plan          # searches + quota cost, no API calls
+python3 scraping/video_scraping/youtube_scrape.py                 # routine run, also writes metadata
+python3 scraping/video_scraping/youtube_scrape.py --no-search     # re-check + relabel existing, ~free
+python3 scraping/video_scraping/youtube_scrape.py --query "flooded street queens"   # ad hoc
+python3 make_youtube_metadata.py                                  # metadata alone
 
 # review sites
 python3 image_review_server.py          # :8765 news, human labels + model answers
@@ -307,8 +431,21 @@ waters included), `in_nyc` labels the five boroughs. MyCoast is limited to
 (`STATE`/`REPORT_TYPES` in `mycoast_scrape.py`). The report page's byline
 names a private individual and is deliberately NOT collected.
 
+Video side (independent of both; design in `scraping/video_scraping/design.md`):
+
+```
+youtube_scrape.py  (search.list -> videos.list -> labels -> thumbnails) -->
+    scrape_data/youtube_searches.jsonl   search answers, appended per call; a
+        |                                CACHE (deleting it only costs quota)
+    data/youtube_videos.json             one row per VIDEO, merged, newest first;
+        |                                thumbnails fingerprinted into the shared
+        |                                data/image_hashes.json
+make_youtube_metadata.refresh()  (same run) -->
+    data/youtube_videos_meta_data.json   counts snapshot (tracked in git)
+```
+
 Supporting files: `data/image_hashes.json` (fingerprint cache, makes dedupe
-re-runs instant), `/home/liu47/models/Qwen3.8-27B` (weights,
+re-runs instant; shared by dedupe.py, dedupe_mycoast.py and youtube_scrape.py), `/home/liu47/models/Qwen3.8-27B` (weights,
 outside the repo).
 
 ## Invariants — do not break these
@@ -575,6 +712,11 @@ Priority is MyCoast and MyCoast-like sources (owner's direction, 2026-09-28).
    `mycoast_ny_map.html`) behind a script; they are still ad-hoc. Add a
    metadata file for `gis_flood_images.json`.
 5. Near-duplicate detection with a signal that works.
-6. Build a small hand-labelled ground-truth set (:8765 / :8768 export
+6. YouTube: add `YOUTUBE_API_KEY` to `.env` and do the first live run of
+   `scraping/video_scraping/youtube_scrape.py`; calibrate signal 1's threshold
+   and the `in_ny` rules against ~150 hand-labelled videos; build signal 3
+   (the VLM over thumbnails -> `flood_visual`); show videos on a review site.
+   Details and open questions in `scraping/video_scraping/design.md`.
+7. Build a small hand-labelled ground-truth set (:8765 / :8768 export
    decisions) so model and prompt changes can be measured instead of guessed.
    MyCoast's coordinates make it the natural geolocalization evaluation set.
