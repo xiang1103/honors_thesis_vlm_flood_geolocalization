@@ -19,12 +19,15 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import sys
 from collections import Counter
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
 PROJECT = Path(__file__).resolve().parent
+sys.path.insert(0, str(PROJECT / "scraping" / "video_scraping"))
+from video_signals import FLOOD_TEXT_THRESHOLD  # noqa: E402
 DEFAULT_INPUT = PROJECT / "data" / "youtube_videos.json"
 DEFAULT_OUTPUT = PROJECT / "data" / "youtube_videos_meta_data.json"   # == refresh()'s derived default
 
@@ -71,6 +74,8 @@ def build(rows: list[dict[str, Any]], source_file: str) -> dict[str, Any]:
         "all": block(rows),
         "available": block([r for r in rows if r.get("available")]),
         "flood_text_score": dict(sorted(Counter(band(r["flood_text_score"]) for r in rows).items())),
+        "flood_text_relevant": sum(bool(r.get("flood_text_relevant")) for r in rows),
+        "flood_text_threshold": FLOOD_TEXT_THRESHOLD,
         "hard_negative": sum(bool(r["flood_text_hits"]["negative"]) for r in rows),
         "after_known_ny_flood": sum(bool(r.get("flood_event_date")) for r in rows),
         "flood_visual": {

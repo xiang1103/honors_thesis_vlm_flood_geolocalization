@@ -25,8 +25,7 @@ There are two collection techniques in the repo:
    flood RELEVANCE, not coordinates; New York is labelled when it can be
    inferred. `scraping/video_scraping/youtube_scrape.py`; format: "REQUIRED
    data format for VIDEOS"; design: `scraping/video_scraping/design.md`.
-   Written 2026-10-05, not yet run against the live API (needs
-   `YOUTUBE_API_KEY` in `.env`).
+   First live run 2026-10-06: 2,074 videos (see State).
 
 **The owner wants to keep focusing on MyCoast data, or data like it.** MyCoast
 is the best source found so far: citizen flood reports taken on foot or from a
@@ -169,6 +168,7 @@ absent -- never omit a key):
 | `ny_basis` | list[str] | every signal that fired: `"coordinates"`, `"gazetteer"`, `"channel"`, `"event_date"` (`"visual"` reserved) |
 | `ny_places` | list[str] | the place names matched, e.g. `["Hollis", "Queens"]` |
 | `flood_text_score` | float | signal 1, 0.0-1.0 (see below) |
+| `flood_text_relevant` | bool | `flood_text_score >= FLOOD_TEXT_THRESHOLD` (0.3, `video_signals.py`); recomputed every run |
 | `flood_text_hits` | dict | `{strong, weak, negative, soft_negative}` -> list of matched terms, so a score can be audited |
 | `flood_event_date` | str or null | signal 2: the known NY flood day (`YYYY-MM-DD`) this video was recorded/uploaded within 3 days after |
 | `flood_visual` | dict or null | signal 3, filled by the verifier: per-thumbnail answers + the aggregate. `null` = not yet classified |
@@ -353,7 +353,9 @@ python3 make_mycoast_metadata.py                  # data/mycoast_meta_data.json 
 
 # videos (no GPU; needs YOUTUBE_API_KEY in .env or the environment)
 python3 scraping/video_scraping/youtube_scrape.py --plan          # searches + quota cost, no API calls
-python3 scraping/video_scraping/youtube_scrape.py                 # routine run, also writes metadata
+python3 scraping/video_scraping/youtube_scrape.py                 # DAILY routine: next unfetched result pages
+                                                                  # (breadth-first, resumes from the search cache),
+                                                                  # ~one page level per day; also writes metadata
 python3 scraping/video_scraping/youtube_scrape.py --no-search     # re-check + relabel existing, ~free
 python3 scraping/video_scraping/youtube_scrape.py --query "flooded street queens"   # ad hoc
 python3 make_youtube_metadata.py                                  # metadata alone
@@ -602,6 +604,14 @@ News:
 - The 29 per-outlet `*_flood.json` were deleted once the corpus
   was verified a field-for-field superset; they remain in git history.
 
+YouTube (2026-10-06, `data/youtube_videos.json`, 9,840 quota units: 2 scrape runs + 2 relabels):
+- 2,761 videos, 11,019 thumbnails (all with digest), uploads 2006-08 to
+  2026-10. Page 1 of all 74 searches + page 2 of the first 23 (page 2 still
+  gave ~30 new videos per search). `flood_text_relevant` (>= 0.3): 2,093.
+  `in_ny` true/false/null: 2,293/263/205; `in_nyc` true 1,262; 591 with
+  uploader coordinates. Not yet VLM-classified, not hand-checked. Videos are
+  NOT downloaded (owner's decision pending; see design.md).
+
 Government / public APIs (New York State):
 - `gis_flood_images.json`: 7,192 image rows -- MyCoast 3,083 (not deduped;
   refreshed 2026-09-28), Wikimedia Commons
@@ -712,8 +722,7 @@ Priority is MyCoast and MyCoast-like sources (owner's direction, 2026-09-28).
    `mycoast_ny_map.html`) behind a script; they are still ad-hoc. Add a
    metadata file for `gis_flood_images.json`.
 5. Near-duplicate detection with a signal that works.
-6. YouTube: add `YOUTUBE_API_KEY` to `.env` and do the first live run of
-   `scraping/video_scraping/youtube_scrape.py`; calibrate signal 1's threshold
+6. YouTube (first run done 2026-10-06): calibrate signal 1's threshold
    and the `in_ny` rules against ~150 hand-labelled videos; build signal 3
    (the VLM over thumbnails -> `flood_visual`); show videos on a review site.
    Details and open questions in `scraping/video_scraping/design.md`.

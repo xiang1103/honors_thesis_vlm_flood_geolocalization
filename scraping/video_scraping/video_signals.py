@@ -56,7 +56,7 @@ HARD_NEGATIVE = re.compile(
     r"\b(minecraft|roblox|fortnite|cities:?\s+skylines|flood\s+escape|"
     r"natural\s+disaster\s+survival|gta\s?(v|5|iv|6)?|gameplay|let'?s\s+play|"
     r"flood\s?fill|flood\s?lights?|noah'?s\s+ark|"
-    r"official\s+(trailer|music\s+video|video|audio)|movie\s+trailer|lyrics?\b|"
+    r"official\s+(trailer|music\s+video|video|audio)|movie\s+trailer|full\s+movie|lyrics?\b|"
     r"water\s+simulation|simulator|blender|houdini|lego|"
     r"flood\s+insurance|house\s+tour|home\s+tour|for\s+sale|real\s+estate|realtor)",
     re.I)
@@ -67,6 +67,11 @@ SOFT_NEGATIVE = re.compile(
     r"\b(compilation|top\s+\d+|most\s+(shocking|insane|terrifying|dangerous)|"
     r"caught\s+on\s+camera\s+compilation|you\s+won'?t\s+believe)\b",
     re.I)
+
+#: `flood_text_relevant` = score >= this. Owner's choice, 2026-10-06 (was an
+#: unstored 0.4 in reports). Changing it needs no API search: re-run
+#: `youtube_scrape.py --no-search` to relabel every video (~1 unit / 50 videos).
+FLOOD_TEXT_THRESHOLD = 0.3
 
 #: YouTube category ids that rarely hold real flood footage.
 PENALISED_CATEGORIES = {
@@ -114,8 +119,13 @@ def score_flood_text(title: str | None, tags: Iterable[str] | None,
 
     strong_title, strong_tags, strong_desc = strong(title), strong(tag_text), strong(desc)
     weak = _hits(WEAK, everything) + _hits(VIDEO_WEAK, everything)
-    hard = _hits(HARD_NEGATIVE, everything)
-    soft = _hits(SOFT_NEGATIVE, everything)
+    # Hard negatives count only where the uploader says what the video IS:
+    # title and tags. In a description they are usually context -- news
+    # descriptions mention flood insurance, broker channels carry "real
+    # estate" boilerplate -- and zeroed 32 genuine flood videos in the first
+    # run (2026-10-06), so there they are a soft negative instead.
+    hard = _hits(HARD_NEGATIVE, f"{title}\n{tag_text}")
+    soft = _hits(SOFT_NEGATIVE, everything) + _hits(HARD_NEGATIVE, desc)
     metaphor = _hits(METAPHOR, everything)
     if category_id in PENALISED_CATEGORIES:
         soft.append(f"category:{PENALISED_CATEGORIES[category_id]}")

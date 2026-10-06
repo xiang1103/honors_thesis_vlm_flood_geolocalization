@@ -1,10 +1,8 @@
 # Video scraping — design
 
-Status 2026-10-05: `youtube_scrape.py` is written and tested against a mocked
-API and the live i.ytimg.com thumbnail host. It has **not yet run against the
-live API** (no key in `.env` yet). Numbers below marked *measured* were
-measured; everything else is a design choice to be checked by the first real
-run and the calibration set (see "Calibration").
+Status 2026-10-06: first live run done (see "First run"). Numbers marked
+*measured* were measured; everything else is a design choice to be checked by
+the calibration set (see "Calibration").
 
 The record format is a contract and lives in `CLAUDE.md` ("REQUIRED data
 format for VIDEOS"). This file is the reasoning behind the pipeline.
@@ -63,10 +61,24 @@ nearly free. Consequences:
 
 - Every search answer is persisted the moment it arrives. A crash or the
   quota running out mid-run loses nothing already paid for.
-- A search answered within `--search-max-age-days` (default 7) is not
-  re-issued. A daily run therefore spends quota only on new or stale searches.
-- The plan is ordered most-specific first (event windows, then geo, then the
-  term x place grid), so a run that hits the budget has spent it well.
+- **The search cache is the bookmark between days.** Paging is
+  breadth-first: page 1 of every search, then page 2 of every search, and so
+  on, down to `--pages` (default 10, about YouTube's ~500-result limit). Page
+  N+1 uses the `next_page_token` stored on cached page N. A run that hits the
+  budget stops wherever it is, and the next day's run of the **same command**
+  skips everything cached and carries on. Each level of the 74-search plan
+  costs about 7,400 units, so it is about one level per day.
+- **Freshness.** A search's first page is re-issued once it is older than
+  `--search-max-age-days` (default 30), to catch new uploads. Deeper pages are
+  never re-issued: their purpose is depth, and re-walking them would spend
+  the quota on results already held. A page token YouTube rejects
+  (`invalidPageToken`) is cached as an empty final page, so no later run pays
+  to fail on it again.
+- **Videos.** `data/youtube_videos.json` is keyed by `video_id`, so a video
+  found again by a new search is merged into its existing row, not
+  duplicated. Its `queries` gain the new search label.
+- Within a level, the plan is ordered most-specific first (event windows,
+  then geo, then the term x place grid).
 - Re-checking every stored video costs `ceil(N/50)` units. For 10,000 videos
   that is 200 units, so it runs by default.
 
@@ -157,8 +169,13 @@ share one flood vocabulary, and adds:
   (Minecraft, Roblox, Fortnite, Cities: Skylines, "flood escape", "natural
   disaster survival", GTA, gameplay); CG and toy floods (water simulation,
   Blender, Houdini, LEGO dam breaks); film and music (official trailer or
-  video, lyrics); `flood fill`, `flood light`, Noah's ark; flood insurance and
-  real-estate tours.
+  video, lyrics, full movie); `flood fill`, `flood light`, Noah's ark; flood
+  insurance and real-estate tours. **Matched in title and tags only**; in the
+  description the same terms are a soft negative. In the first run,
+  description matches zeroed 32 of 44 videos, nearly all genuine flood news
+  (PIX11 "Families clean up from Staten Island flooding", whose description
+  mentioned insurance; broker channels with "real estate" boilerplate). After
+  the change, 13 videos are zeroed.
 - **Soft negatives (−0.15 each, capped at −0.45)**: `compilation`,
   `top N`, `most shocking`. These are usually real floods, but stitched from
   other people's clips with no reliable place or date.
@@ -178,7 +195,10 @@ share one flood vocabulary, and adds:
 - **Weak terms**: up to +0.10.
 - **Event named in the title and in tags or description**: +0.10.
 
-No boolean is stored. The threshold is chosen after calibration.
+`flood_text_relevant` = `flood_text_score >= FLOOD_TEXT_THRESHOLD`
+(`video_signals.py`; 0.3, owner's choice 2026-10-06). It is recomputed on
+every run, so changing the threshold needs only `--no-search`, about 1 unit
+per 50 videos. Calibration should still check it.
 
 *Measured on hand-made titles* (title only, no tags or description; a
 smoke test, not an evaluation):
@@ -321,6 +341,48 @@ gives a neighbourhood centroid, which is not where the camera was.
      cost of being conservative);
    - which queries and plan stages pay (each record's `queries`).
 3. Build signal 3 and measure it against the same labels.
+
+## First run (2026-10-06, *measured*)
+
+The full plan was 74 searches, plus `videos.list` and thumbnails, spending
+7,442 quota units.
+
+- **Videos**: 2,074 kept; 1 was not playable and was skipped. Upload dates
+  run from 2006-08 to 2026-10-06. Median duration is 80 s; 74 videos are over
+  20 minutes.
+- **Thumbnails**: 8,279 kept (11 did not decode, 6 repeated within a video),
+  so `thumbnails_without_digest` = 0. 29 are shared across videos
+  (re-uploads).
+- **`flood_text_score`** (after the hard-negative fix): 1,587 videos
+  relevant at the 0.3 threshold (1,522 at 0.4), 13 hard negatives.
+- **Searches**: 3,654 results gave 2,075 unique videos (43% overlap between
+  searches). 68 of the 74 searches have more pages. The stages contributed
+  400 (event), 261 (geo) and 1,414 (grid) new videos. So page 1 is far from
+  everything; deeper pages are what the following days' runs fetch.
+- **`in_ny`**: 1,731 true, 182 false, 161 null. Of the 182 false, 100 come
+  from coordinates (the geo circles spill into NJ and CT, and the boundary
+  test catches that). The other 82 come from text naming elsewhere; "New
+  Jersey" accounts for 81 term hits.
+- **`in_nyc`**: 957 true.
+- **Coordinates**: 343 videos have them, 264 of those found by the geo
+  circles. That is far more than expected. Uploaders of local flood clips set
+  a location more often than YouTube at large.
+- **`flood_event_date`** set: 859.
+
+**Observed in a sample** (by title, not frames):
+
+- The 0.6+ band is almost all real NY flood news or footage.
+- Upstate place names without a NY marker stay null by design. For example,
+  "Thunderstorms cause flooding in parts of Amherst, Buffalo" from WIVB stays
+  null; WIVB is in the NY-only channel list, but its channel title is
+  "WIVBTV", which the pattern misses.
+- Some genuine flood clips score low because their wording is unusual
+  ("CARS HAD TO BE PULLED OUT OF WATER", 0.32).
+- `score 0` without a negative is mostly non-flood water content (water main
+  breaks, jet boats, lake views).
+
+These are reasons to calibrate before choosing a threshold. They are not
+fixed yet.
 
 ## Open questions
 

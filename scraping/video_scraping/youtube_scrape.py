@@ -11,8 +11,9 @@ Steps:
   1. search.list   the query plan (event windows, geo circles, flood term x
                    NY place), 100 quota units per call. Every response is
                    appended to scrape_data/youtube_searches.jsonl as it
-                   arrives, so spent quota is never lost and a re-run within
-                   --search-max-age-days re-issues nothing.
+                   arrives, so spent quota is never lost. Breadth-first and
+                   resumable: each run fetches the next pages not yet in the
+                   cache, so running the same command daily walks deeper.
   2. videos.list   full metadata for every id found, plus a re-check of every
                    video already in the file (1 unit per 50 ids).
   3. labels        video_signals.py: flood_text_score, flood_event_date,
@@ -136,6 +137,14 @@ class QuotaExceeded(Exception):
     pass
 
 
+class ApiError(RuntimeError):
+    """Any other API refusal; `reasons` are YouTube's error reason codes."""
+
+    def __init__(self, message: str, reasons: set[str]):
+        super().__init__(message)
+        self.reasons = reasons
+
+
 class YouTube:
     """search.list / videos.list with quota accounting."""
 
@@ -158,8 +167,9 @@ class YouTube:
             reasons = {e.get("reason") for e in err.get("errors", [])}
             if reasons & {"quotaExceeded", "dailyLimitExceeded"}:
                 raise QuotaExceeded("YouTube daily quota exhausted") from None
-            raise RuntimeError(f"YouTube {endpoint}: HTTP {exc.response.status_code} "
-                               f"{sorted(r for r in reasons if r)} {err.get('message', '')}") from None
+            raise ApiError(f"YouTube {endpoint}: HTTP {exc.response.status_code} "
+                           f"{sorted(r for r in reasons if r)} {err.get('message', '')}",
+                           {r for r in reasons if r}) from None
         self.spent += units
         return resp.json()
 
@@ -195,9 +205,21 @@ def read_search_cache(path: Path) -> list[dict[str, Any]]:
 
 def run_searches(yt: YouTube | None, plan: list[tuple[str, dict[str, Any]]], pages: int,
                  max_age_days: float, cache_path: Path) -> list[dict[str, Any]]:
-    """Issue every planned search page not answered within `max_age_days`.
+    """Issue every planned search page not already in the cache.
+
+    BREADTH-FIRST: page 1 of every search, then page 2 of every search, ...
+    So a run that hits the quota has gone one level deeper everywhere, and the
+    next day's run (same command) carries on from the first page not yet
+    fetched -- the cache is the bookmark. Page N+1 is fetched with the
+    `next_page_token` stored on cached page N.
+
+    Freshness: page 1 is re-issued once older than `max_age_days`, to catch
+    new uploads. Deeper pages are never re-issued -- their point is depth, and
+    re-walking them would spend the whole quota on results already held.
+
     Returns the whole cache (old + new); each answer is appended and flushed
-    the moment it arrives."""
+    the moment it arrives, so quota already spent is never lost.
+    """
     cache = read_search_cache(cache_path)
     latest: dict[tuple[str, int], dict[str, Any]] = {}
     for row in cache:
@@ -206,37 +228,51 @@ def run_searches(yt: YouTube | None, plan: list[tuple[str, dict[str, Any]]], pag
     if yt is None:
         return cache
 
-    issued = reused = 0
+    issued = reused = exhausted = 0
     cache_path.parent.mkdir(parents=True, exist_ok=True)
     with cache_path.open("a", encoding="utf-8") as fh:
-        for label, params in plan:
-            key, token = search_key(params), None
-            for page in range(1, pages + 1):
+        for page in range(1, pages + 1):
+            for label, params in plan:
+                key, token = search_key(params), None
+                if page > 1:
+                    prev = latest.get((key, page - 1))
+                    if not prev:
+                        continue                 # previous page not fetched yet
+                    token = prev.get("next_page_token")
+                    if not token:
+                        exhausted += page == pages
+                        continue                 # this search has no more results
                 hit = latest.get((key, page))
-                if hit and hit["fetched_at"] >= cutoff:
+                if hit and (page > 1 or hit["fetched_at"] >= cutoff):
                     reused += 1
-                    token = hit.get("next_page_token")
-                else:
-                    try:
-                        data = yt.call("search", SEARCH_COST, **params,
-                                       **({"pageToken": token} if token else {}))
-                    except QuotaExceeded as exc:
-                        log(f"  search stopped: {exc}; {issued} issued, the rest next run")
-                        return cache
-                    hit = {"key": key, "label": label, "params": params, "page": page,
-                           "video_ids": [i["id"]["videoId"] for i in data.get("items", [])
-                                         if i.get("id", {}).get("videoId")],
-                           "next_page_token": data.get("nextPageToken"),
-                           "total_results": data.get("pageInfo", {}).get("totalResults"),
-                           "fetched_at": now_iso()}
-                    fh.write(json.dumps(hit, ensure_ascii=False) + "\n")
-                    fh.flush()
-                    cache.append(hit)
-                    issued += 1
-                    log(f"  [{issued}] {label} p{page}: {len(hit['video_ids'])} videos")
-                    token = hit["next_page_token"]
-                if not token:
-                    break
+                    continue
+                try:
+                    data = yt.call("search", SEARCH_COST, **params,
+                                   **({"pageToken": token} if token else {}))
+                except QuotaExceeded as exc:
+                    log(f"  search stopped at page {page}: {exc}; {issued} issued this run, "
+                        f"the next run continues from here")
+                    return cache
+                except ApiError as exc:
+                    if "invalidPageToken" not in exc.reasons:
+                        raise
+                    # Recorded as an empty, final page so later runs do not
+                    # pay to fail again; this search simply ends here.
+                    log(f"  {label} p{page}: page token no longer valid, search ends here")
+                    data = {"error": "invalidPageToken"}
+                hit = {"key": key, "label": label, "params": params, "page": page,
+                       "video_ids": [i["id"]["videoId"] for i in data.get("items", [])
+                                     if i.get("id", {}).get("videoId")],
+                       "next_page_token": data.get("nextPageToken"),
+                       "total_results": data.get("pageInfo", {}).get("totalResults"),
+                       "error": data.get("error"),
+                       "fetched_at": now_iso()}
+                fh.write(json.dumps(hit, ensure_ascii=False) + "\n")
+                fh.flush()
+                cache.append(hit)
+                latest[(key, page)] = hit
+                issued += 1
+                log(f"  [{issued}] {label} p{page}: {len(hit['video_ids'])} videos")
     log(f"searches: {issued} issued, {reused} answered from cache ({cache_path.name})")
     return cache
 
@@ -292,7 +328,8 @@ VIDEO_FIELDS = ["video_id", "record_id", "source", "source_url", "embed_url", "t
                 "description", "tags", "channel_id", "channel_title", "published_utc",
                 "recording_date", "duration_s", "category_id", "language", "license",
                 "thumbnails", "lat", "lon", "location_basis", "in_ny", "in_nyc", "ny_basis",
-                "ny_places", "flood_text_score", "flood_text_hits", "flood_event_date",
+                "ny_places", "flood_text_score", "flood_text_hits", "flood_text_relevant",
+                "flood_event_date",
                 "flood_visual", "queries", "text", "available", "checked_at", "api_fields",
                 "scraped_at"]
 
@@ -382,6 +419,7 @@ def build_record(item: dict[str, Any], queries: set[str], labeller: Labeller,
     recorded = utc_iso(rd.get("recordingDate"))
     event = signals.match_flood_event(recorded or published, labeller.events)
     score, hits = signals.score_flood_text(title, tags, description, sn.get("categoryId"))
+    relevant = score >= signals.FLOOD_TEXT_THRESHOLD
     ny = signals.label_new_york(text, sn.get("channelTitle"), labeller.gazetteer,
                                 coord_ny, coord_nyc, event)
 
@@ -407,6 +445,7 @@ def build_record(item: dict[str, Any], queries: set[str], labeller: Labeller,
         **ny,
         "flood_text_score": score,
         "flood_text_hits": hits,
+        "flood_text_relevant": relevant,
         "flood_event_date": event,
         "flood_visual": (existing or {}).get("flood_visual"),     # set by the verifier, kept
         "queries": sorted(queries | set((existing or {}).get("queries") or [])),
@@ -480,11 +519,15 @@ def main() -> int:
     ap.add_argument("--output", type=Path, default=DEFAULT_OUTPUT)
     ap.add_argument("--query", action="append", metavar="Q",
                     help="search this instead of the built-in plan (repeatable)")
-    ap.add_argument("--pages", type=int, default=1, help="result pages per search, 50 videos each (default 1)")
+    ap.add_argument("--pages", type=int, default=10,
+                    help="how deep to page each search, 50 videos per page (default 10, YouTube's "
+                         "practical limit is ~500 results). Breadth-first, so a daily run of the same "
+                         "command goes one level deeper per ~7,400 units")
     ap.add_argument("--max-units", type=int, default=9_500,
                     help=f"quota units this run may spend (default 9500 of the {DAILY_QUOTA} daily)")
-    ap.add_argument("--search-max-age-days", type=float, default=7,
-                    help="re-issue a cached search only if older than this (default 7)")
+    ap.add_argument("--search-max-age-days", type=float, default=30,
+                    help="re-issue a search's FIRST page once older than this, for new uploads "
+                         "(default 30). Deeper pages are never re-issued")
     ap.add_argument("--no-search", action="store_true", help="skip step 1: re-check + relabel existing videos")
     ap.add_argument("--no-recheck", action="store_true", help="fetch only videos not yet in the file")
     ap.add_argument("--plan", action="store_true", help="print the planned searches and their cost, then exit")
@@ -556,7 +599,8 @@ def main() -> int:
 def summarize(rows: list[dict[str, Any]]) -> None:
     def n(pred) -> int:
         return sum(1 for r in rows if pred(r))
-    log(f"  flood_text_score >= 0.4 : {n(lambda r: r['flood_text_score'] >= 0.4)}")
+    log(f"  flood_text_relevant     : {n(lambda r: r['flood_text_relevant'])} "
+        f"(score >= {signals.FLOOD_TEXT_THRESHOLD})")
     log(f"  hard negative (score 0) : {n(lambda r: r['flood_text_hits']['negative'])}")
     log(f"  in_ny true/false/unknown: {n(lambda r: r['in_ny'] is True)}/"
         f"{n(lambda r: r['in_ny'] is False)}/{n(lambda r: r['in_ny'] is None)}")
