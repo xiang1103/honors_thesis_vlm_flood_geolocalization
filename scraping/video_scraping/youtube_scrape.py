@@ -11,9 +11,10 @@ Steps:
   1. search.list   the query plan (event windows, geo circles, flood term x
                    NY place), 100 quota units per call. Every response is
                    appended to scrape_data/youtube_searches.jsonl as it
-                   arrives, so spent quota is never lost. Breadth-first and
-                   resumable: each run fetches the next pages not yet in the
-                   cache, so running the same command daily walks deeper.
+                   arrives, so spent quota is never lost. Relevance-ranked,
+                   breadth-first and resumable: each run fetches the next
+                   pages not yet in the cache; once every page is walked it
+                   re-walks them oldest first, forever (run_searches()).
   2. videos.list   full metadata for every id found, plus a re-check of every
                    video already in the file (1 unit per 50 ids).
   3. labels        video_signals.py: flood_text_score, flood_event_date,
@@ -204,76 +205,112 @@ def read_search_cache(path: Path) -> list[dict[str, Any]]:
 
 
 def run_searches(yt: YouTube | None, plan: list[tuple[str, dict[str, Any]]], pages: int,
-                 max_age_days: float, cache_path: Path) -> list[dict[str, Any]]:
-    """Issue every planned search page not already in the cache.
+                 cache_path: Path) -> list[dict[str, Any]]:
+    """Spend the run's search budget: finish the walk, then re-walk, forever.
 
-    BREADTH-FIRST: page 1 of every search, then page 2 of every search, ...
-    So a run that hits the quota has gone one level deeper everywhere, and the
-    next day's run (same command) carries on from the first page not yet
-    fetched -- the cache is the bookmark. Page N+1 is fetched with the
-    `next_page_token` stored on cached page N.
+    Owner's design (2026-10-07): keep RELEVANCE ranking; walk every page of
+    every search; once all are walked, start over. Each run does, in order:
 
-    Freshness: page 1 is re-issued once older than `max_age_days`, to catch
-    new uploads. Deeper pages are never re-issued -- their point is depth, and
-    re-walking them would spend the whole quota on results already held.
+      1. WALK -- every page never fetched, BREADTH-FIRST (page 1 of every
+         search, then page 2 of every search, ...). Page N+1 is requested with
+         the `next_page_token` saved on page N. A search ends at `pages` or
+         when YouTube returns no token.
+      2. RE-WALK -- only once step 1 has nothing left: re-fetch already-saved
+         pages OLDEST FIRST (by `fetched_at`). A full pass of 74 searches x 10
+         pages is ~740 pages at ~93 a day, so every page is refreshed about
+         every 8 days. New uploads that rank into a query's top ~500 are picked
+         up on the next visit to the page they landed on.
 
-    Returns the whole cache (old + new); each answer is appended and flushed
-    the moment it arrives, so quota already spent is never lost.
+    Both steps run in one call, so a run that finishes the walk with budget
+    left starts the re-walk at once. A re-fetched page that now has a token
+    where it had none (the search grew) makes new step-1 work for the next run.
+
+    Tokens are positions, not snapshots ('CDIQAA' = "from result 50", the same
+    for every search), so a re-walked page is that slot of TODAY's ranking.
+
+    The cache is the bookmark: each answer is appended and flushed the moment
+    it arrives, so quota already spent is never lost, and the latest line per
+    (search, page) is what counts. Returns the whole cache (old + new).
     """
     cache = read_search_cache(cache_path)
     latest: dict[tuple[str, int], dict[str, Any]] = {}
     for row in cache:
         latest[(row["key"], row["page"])] = row
-    cutoff = (datetime.now(timezone.utc) - timedelta(days=max_age_days)).isoformat()
     if yt is None:
         return cache
 
-    issued = reused = exhausted = 0
+    searches = [(label, params, search_key(params)) for label, params in plan]
+    run_started = now_iso()
+
+    def token_for(key: str, page: int) -> tuple[bool, str | None]:
+        """(fetchable now, token). Page 1 needs none; page N needs page N-1's."""
+        if page == 1:
+            return True, None
+        prev = latest.get((key, page - 1))
+        token = (prev or {}).get("next_page_token")
+        return bool(token), token
+
+    issued = {"walk": 0, "re-walk": 0}
     cache_path.parent.mkdir(parents=True, exist_ok=True)
     with cache_path.open("a", encoding="utf-8") as fh:
+
+        def fetch(phase: str, label: str, params: dict[str, Any], key: str,
+                  page: int, token: str | None) -> bool:
+            """One search page into the cache. False once the budget is spent."""
+            try:
+                data = yt.call("search", SEARCH_COST, **params,
+                               **({"pageToken": token} if token else {}))
+            except QuotaExceeded as exc:
+                log(f"  search stopped ({phase}, page {page}): {exc}; "
+                    f"the next run continues from here")
+                return False
+            except ApiError as exc:
+                if "invalidPageToken" not in exc.reasons:
+                    raise
+                # Recorded as an empty, final page so the walk does not pay to
+                # fail again; the re-walk retries it when it is the oldest.
+                log(f"  {label} p{page}: page token no longer valid, search ends here")
+                data = {"error": "invalidPageToken"}
+            hit = {"key": key, "label": label, "params": params, "page": page,
+                   "video_ids": [i["id"]["videoId"] for i in data.get("items", [])
+                                 if i.get("id", {}).get("videoId")],
+                   "next_page_token": data.get("nextPageToken"),
+                   "total_results": data.get("pageInfo", {}).get("totalResults"),
+                   "error": data.get("error"),
+                   "fetched_at": now_iso()}
+            fh.write(json.dumps(hit, ensure_ascii=False) + "\n")
+            fh.flush()
+            cache.append(hit)
+            latest[(key, page)] = hit
+            issued[phase] += 1
+            log(f"  [{phase} {issued[phase]}] {label} p{page}: {len(hit['video_ids'])} videos")
+            return True
+
+        # 1. Walk: pages never fetched, breadth-first.
         for page in range(1, pages + 1):
-            for label, params in plan:
-                key, token = search_key(params), None
-                if page > 1:
-                    prev = latest.get((key, page - 1))
-                    if not prev:
-                        continue                 # previous page not fetched yet
-                    token = prev.get("next_page_token")
-                    if not token:
-                        exhausted += page == pages
-                        continue                 # this search has no more results
-                hit = latest.get((key, page))
-                if hit and (page > 1 or hit["fetched_at"] >= cutoff):
-                    reused += 1
+            for label, params, key in searches:
+                if (key, page) in latest:
                     continue
-                try:
-                    data = yt.call("search", SEARCH_COST, **params,
-                                   **({"pageToken": token} if token else {}))
-                except QuotaExceeded as exc:
-                    log(f"  search stopped at page {page}: {exc}; {issued} issued this run, "
-                        f"the next run continues from here")
+                ok, token = token_for(key, page)
+                if ok and not fetch("walk", label, params, key, page, token):
                     return cache
-                except ApiError as exc:
-                    if "invalidPageToken" not in exc.reasons:
-                        raise
-                    # Recorded as an empty, final page so later runs do not
-                    # pay to fail again; this search simply ends here.
-                    log(f"  {label} p{page}: page token no longer valid, search ends here")
-                    data = {"error": "invalidPageToken"}
-                hit = {"key": key, "label": label, "params": params, "page": page,
-                       "video_ids": [i["id"]["videoId"] for i in data.get("items", [])
-                                     if i.get("id", {}).get("videoId")],
-                       "next_page_token": data.get("nextPageToken"),
-                       "total_results": data.get("pageInfo", {}).get("totalResults"),
-                       "error": data.get("error"),
-                       "fetched_at": now_iso()}
-                fh.write(json.dumps(hit, ensure_ascii=False) + "\n")
-                fh.flush()
-                cache.append(hit)
-                latest[(key, page)] = hit
-                issued += 1
-                log(f"  [{issued}] {label} p{page}: {len(hit['video_ids'])} videos")
-    log(f"searches: {issued} issued, {reused} answered from cache ({cache_path.name})")
+
+        # 2. Re-walk: every saved page, oldest first -- except pages this run
+        # already fetched, which would be paying twice for the same answer.
+        saved = sorted(((latest[(key, page)]["fetched_at"], page, label, params, key)
+                        for label, params, key in searches
+                        for page in range(1, pages + 1)
+                        if (key, page) in latest and latest[(key, page)]["fetched_at"] < run_started),
+                       key=lambda t: (t[0], t[1]))
+        if saved:
+            log(f"walk complete: {len(saved)} pages saved; re-walking oldest first "
+                f"(oldest fetched {saved[0][0][:10]})")
+        for _, page, label, params, key in saved:
+            ok, token = token_for(key, page)
+            if ok and not fetch("re-walk", label, params, key, page, token):
+                return cache
+
+    log(f"searches: {issued['walk']} walk + {issued['re-walk']} re-walk pages issued")
     return cache
 
 
@@ -525,9 +562,6 @@ def main() -> int:
                          "command goes one level deeper per ~7,400 units")
     ap.add_argument("--max-units", type=int, default=9_500,
                     help=f"quota units this run may spend (default 9500 of the {DAILY_QUOTA} daily)")
-    ap.add_argument("--search-max-age-days", type=float, default=30,
-                    help="re-issue a search's FIRST page once older than this, for new uploads "
-                         "(default 30). Deeper pages are never re-issued")
     ap.add_argument("--no-search", action="store_true", help="skip step 1: re-check + relabel existing videos")
     ap.add_argument("--no-recheck", action="store_true", help="fetch only videos not yet in the file")
     ap.add_argument("--plan", action="store_true", help="print the planned searches and their cost, then exit")
@@ -562,8 +596,7 @@ def main() -> int:
         recheck_units = 0 if args.no_recheck else -(-len(existing) // 50)
         max_pages = max(0, (args.max_units - recheck_units) // (SEARCH_COST + LIST_COST))
         yt.budget = args.max_units - recheck_units - max_pages * LIST_COST
-        cache = run_searches(None if args.no_search else yt, plan, args.pages,
-                             args.search_max_age_days, SEARCH_CACHE)
+        cache = run_searches(None if args.no_search else yt, plan, args.pages, SEARCH_CACHE)
         yt.budget = args.max_units
         found = queries_by_video(cache)
         new_ids = [v for v in found if v not in existing]

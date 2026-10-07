@@ -208,15 +208,17 @@ file are NEW ones failing playability (counted in the run log).
 
 ## Videos: how flood relevance and New York are decided
 
-Full reasoning, measurements and open questions:
-**`scraping/video_scraping/design.md`** -- read it before changing the search
-plan or `video_signals.py`. In short:
+Owner's decisions and the reasoning behind them:
+**`scraping/video_scraping/CLAUDE.md`**; full measurements and open
+questions: **`scraping/video_scraping/design.md`** -- read both before
+changing the search plan, the walk, or `video_signals.py`. In short:
 
 - YouTube has no "flood" filter. `search.list` costs 100 of the 10,000 daily
   quota units; `videos.list` is 1 unit per 50 ids. The search plan aims at New
   York (event date windows, geo circles, flood term x NY place); every search
   answer is cached in `scrape_data/youtube_searches.jsonl` the moment it
-  arrives.
+  arrives. Relevance-ranked: every page of every search is walked, then
+  re-walked oldest first, forever (owner's design, 2026-10-07).
 - Flood relevance is three independent signals, none a filter: (1) text --
   `flood_text_score`, `verify_text.py`'s vocabulary plus video terms, hard
   negatives (games, CG, trailers, insurance...) zero it; (2) `flood_event_date`
@@ -285,7 +287,8 @@ disk pressure without checking the absolute number first.
 scraping/         news crawl           scrape.py, adapters.py, run_crawl.sh, design.md, export.py
   api_based_scraping/   government/public APIs (ACTIVE): gis_scrape.py, mycoast_scrape.py
                         superseded GDELT news discovery: news_scrape.py + news_api_design.md
-  video_scraping/       videos (ACTIVE): youtube_scrape.py, video_signals.py, design.md
+  video_scraping/       videos (ACTIVE): youtube_scrape.py, video_signals.py, design.md,
+                        CLAUDE.md (owner's decisions + how the daily walk works)
 verification/     judging only         verify_text.py, verify_images_vlm.py, dedupe.py
                   MyCoast              dedupe_mycoast.py
                   New York subset      filter_nyc.py  (news -> nyc_scraped_images.json)
@@ -353,9 +356,9 @@ python3 make_mycoast_metadata.py                  # data/mycoast_meta_data.json 
 
 # videos (no GPU; needs YOUTUBE_API_KEY in .env or the environment)
 python3 scraping/video_scraping/youtube_scrape.py --plan          # searches + quota cost, no API calls
-python3 scraping/video_scraping/youtube_scrape.py                 # DAILY routine: next unfetched result pages
-                                                                  # (breadth-first, resumes from the search cache),
-                                                                  # ~one page level per day; also writes metadata
+python3 scraping/video_scraping/youtube_scrape.py                 # DAILY routine (cron): walk unfetched pages by
+                                                                  # relevance, breadth-first; when all are walked,
+                                                                  # re-walk oldest first (~8-day cycle); writes metadata
 python3 scraping/video_scraping/youtube_scrape.py --no-search     # re-check + relabel existing, ~free
 python3 scraping/video_scraping/youtube_scrape.py --query "flooded street queens"   # ad hoc
 python3 make_youtube_metadata.py                                  # metadata alone

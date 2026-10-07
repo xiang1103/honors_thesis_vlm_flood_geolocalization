@@ -158,6 +158,13 @@ python3 map_countries.py            # country map of the news corpus
 python3 map_countries.py --serve    # also defaults to :8768 -- use --serve <port> if the GIS site is running
 ```
 
+## Video scraping 
+- Scrape YouTube API for video metadata, then use 3rd party to actually download the videos 
+- search page --> get all video Ids --> get metadata information for all of the videos 
+- for every video, run a text rule-based matching to see how relevant the video is to flooding by calculating a threshold 
+- Scraping job is run on CRON jobs 
+- data is writtent to data/youtube_videos.json 
+- .jsonl file shows which pages we have walked and the videos whose details are not fetched. Every night, the script picks up to which page is not fetched yet. If every page is fetched, it restarts over from page 1 to get new data. 
 
 
 ## Future Designs 

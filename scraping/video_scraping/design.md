@@ -68,12 +68,18 @@ nearly free. Consequences:
   budget stops wherever it is, and the next day's run of the **same command**
   skips everything cached and carries on. Each level of the 74-search plan
   costs about 7,400 units, so it is about one level per day.
-- **Freshness.** A search's first page is re-issued once it is older than
-  `--search-max-age-days` (default 30), to catch new uploads. Deeper pages are
-  never re-issued: their purpose is depth, and re-walking them would spend
-  the quota on results already held. A page token YouTube rejects
-  (`invalidPageToken`) is cached as an empty final page, so no later run pays
-  to fail on it again.
+- **Walk, then re-walk, forever** (owner's design, 2026-10-07; see
+  `CLAUDE.md` in this folder for the discussion behind it). Once no
+  unfetched page remains, each run re-fetches saved pages **oldest first**,
+  keeping relevance order. 740 pages at about 93 a day means every page is
+  refreshed about every 8 days. Page tokens are positions, not snapshots
+  (`CDIQAA` decodes to "from result 50", identical for every search), so a
+  re-walked page is that slot of the current ranking. New uploads that rank
+  into a query's top ~500 are caught on the next visit to the page they
+  landed on. A re-walked page that gains a token (the search grew) becomes
+  walk work for the next run. Pages already fetched in the current run are
+  never re-fetched in it. A page token YouTube rejects (`invalidPageToken`)
+  is cached as an empty final page; the re-walk retries it in turn.
 - **Videos.** `data/youtube_videos.json` is keyed by `video_id`, so a video
   found again by a new search is merged into its existing row, not
   duplicated. Its `queries` gain the new search label.
