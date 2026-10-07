@@ -12,8 +12,9 @@ the end of every run (CLAUDE.md: a scrape regenerates its metadata).
   flood_visual             classified by the VLM yet, and how many said yes
   in_ny / in_nyc           true / false / unknown -- unknown is the common case
   by_year                  videos per upload year
-(hard_negative, ny_basis, by_category, top_channels and top_queries were
-removed 2026-10-07 with the record fields they counted -- owner's trim.)
+(hard_negative, ny_basis, by_category, top_channels, top_queries and
+after_known_ny_flood were removed 2026-10-07 with the record fields they
+counted -- owner's trim.)
 """
 from __future__ import annotations
 
@@ -75,9 +76,10 @@ def build(rows: list[dict[str, Any]], source_file: str) -> dict[str, Any]:
         "all": block(rows),
         "available": block([r for r in rows if r.get("available")]),
         "flood_text_score": dict(sorted(Counter(band(r["flood_text_score"]) for r in rows).items())),
-        "flood_text_relevant": sum(bool(r.get("flood_text_relevant")) for r in rows),
+        # Still reported: computed from the score since the field itself was
+        # dropped (2026-10-07). after_known_ny_flood went with flood_event_date.
+        "flood_text_relevant": sum((r.get("flood_text_score") or 0) >= FLOOD_TEXT_THRESHOLD for r in rows),
         "flood_text_threshold": FLOOD_TEXT_THRESHOLD,
-        "after_known_ny_flood": sum(bool(r.get("flood_event_date")) for r in rows),
         "flood_visual": {
             "classified": len(visual),
             "yes": sum(v.get("flood") == "yes" for v in visual),

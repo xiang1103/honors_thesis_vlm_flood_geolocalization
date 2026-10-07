@@ -31,7 +31,7 @@ search.list  (plan: event windows -> geo circles -> flood term x NY place)
     |  every answer appended + flushed to scrape_data/youtube_searches.jsonl
 videos.list  (new ids + re-check of every existing video, 1 unit / 50 ids)
     |
-labels       video_signals.py: flood_text_score, flood_event_date, in_ny/in_nyc
+labels       video_signals.py: flood_text_score, in_ny/in_nyc
     |        coordinates (when the uploader set them) vs the Census NY boundary
 thumbnails   i.ytimg cover + hq1/hq2/hq3, fetched + fingerprinted
     |        (shared data/image_hashes.json); undecodable ones and in-video
@@ -169,7 +169,7 @@ best street-view frame from a dashcam clip. That limitation is accepted for now.
 The signals are recorded independently. **None is a filter**, the same
 invariant as the news verifiers.
 
-### Signal 1: text (`score_flood_text` -> `flood_text_score`, `flood_text_relevant`)
+### Signal 1: text (`score_flood_text` -> `flood_text_score`)
 
 The matched terms (`flood_text_hits`) are computed but no longer stored
 (2026-10-07 trim). To see why a video scored what it did, call
@@ -214,10 +214,11 @@ share one flood vocabulary, and adds:
 - **Weak terms**: up to +0.10.
 - **Event named in the title and in tags or description**: +0.10.
 
-`flood_text_relevant` = `flood_text_score >= FLOOD_TEXT_THRESHOLD`
-(`video_signals.py`; 0.3, owner's choice 2026-10-06). It is recomputed on
-every run, so changing the threshold needs only `--no-search`, about 1 unit
-per 50 videos. Calibration should still check it.
+A video counts as a flood video when `flood_text_score >=
+FLOOD_TEXT_THRESHOLD` (`video_signals.py`; 0.3, owner's choice 2026-10-06).
+The boolean is not stored (dropped 2026-10-07): readers and
+`export_flood_videos.is_flood()` apply the threshold, so changing it needs no
+re-scrape at all. Calibration should still check it.
 
 *Measured on hand-made titles* (title only, no tags or description; a
 smoke test, not an evaluation):
@@ -242,7 +243,11 @@ EVENT, not the camera"), and titles fail it in the same way. Non-English
 titles score about 0 and are kept with that score. The vocabulary is English
 only.
 
-### Signal 2: known flood event (`flood_event_date`)
+### Signal 2: known flood event (DROPPED 2026-10-07)
+
+The owner removed `flood_event_date`; the scraper no longer computes it. The
+functions (`flood_event_days`, `match_flood_event`) remain in
+`video_signals.py`, unused, in case it comes back. What it did:
 
 This is the latest known NY flood day on, or up to 3 days before, the
 recording date (else the upload date). Known flood days are:

@@ -17,7 +17,7 @@ Steps:
                    re-walks them oldest first, forever (run_searches()).
   2. videos.list   full metadata for every id found, plus a re-check of every
                    video already in the file (1 unit per 50 ids).
-  3. labels        video_signals.py: flood_text_score, flood_event_date,
+  3. labels        video_signals.py: flood_text_score,
                    in_ny / in_nyc; coordinates tested against the Census NY
                    boundary when the uploader set them.
   4. thumbnails    i.ytimg.com cover + three auto-frames per video, fetched
@@ -367,13 +367,15 @@ def playable(item: dict[str, Any]) -> bool:
 
 #: The stored fields, in order. Trimmed by the owner 2026-10-07: channel,
 #: category, language, license, location_basis, ny_basis, ny_places,
-#: flood_text_hits, queries, text and api_fields are no longer stored. The
+#: flood_text_hits, queries, text and api_fields are no longer stored; nor,
+#: from a second trim the same day, flood_text_relevant (it is just
+#: flood_text_score >= FLOOD_TEXT_THRESHOLD) and flood_event_date. The
 #: labels still USE channel title, category and the joined text -- read from
 #: the API response in memory while labelling, then discarded.
 VIDEO_FIELDS = ["video_id", "record_id", "source", "source_url", "embed_url", "title",
                 "description", "tags", "published_utc", "recording_date", "duration_s",
                 "thumbnails", "lat", "lon", "in_ny", "in_nyc",
-                "flood_text_score", "flood_text_relevant", "flood_event_date", "flood_visual",
+                "flood_text_score", "flood_visual",
                 "available", "checked_at", "scraped_at"]
 
 DURATION = re.compile(r"^P(?:(\d+)D)?(?:T(?:(\d+)H)?(?:(\d+)M)?(?:(\d+)S)?)?$")
@@ -426,10 +428,8 @@ class Labeller:
     def __init__(self, client: Client):
         mycoast = json.loads(MYCOAST.read_text(encoding="utf-8")) if MYCOAST.exists() else []
         self.gazetteer = signals.Gazetteer((r.get("place"), r.get("county")) for r in mycoast)
-        self.events = signals.flood_event_days(mycoast)
         self._client, self._regions = client, None
-        log(f"labels: {len(self.events)} known NY flood days, "
-            f"{len({r.get('place') for r in mycoast})} MyCoast places in the gazetteer")
+        log(f"labels: {len({r.get('place') for r in mycoast})} MyCoast places in the gazetteer")
 
     def regions(self) -> Regions:
         """NY / NYC boundaries, fetched only if some video has coordinates."""
@@ -457,11 +457,9 @@ def build_record(item: dict[str, Any], labeller: Labeller,
 
     published = utc_iso(sn.get("publishedAt"))
     recorded = utc_iso(rd.get("recordingDate"))
-    event = signals.match_flood_event(recorded or published, labeller.events)
     score, _hits = signals.score_flood_text(title, tags, description, sn.get("categoryId"))
-    relevant = score >= signals.FLOOD_TEXT_THRESHOLD
     ny = signals.label_new_york(text, sn.get("channelTitle"), labeller.gazetteer,
-                                coord_ny, coord_nyc, event)
+                                coord_ny, coord_nyc, None)
 
     rec = {
         "video_id": vid,
@@ -480,8 +478,6 @@ def build_record(item: dict[str, Any], labeller: Labeller,
         "in_ny": ny["in_ny"],
         "in_nyc": ny["in_nyc"],
         "flood_text_score": score,
-        "flood_text_relevant": relevant,
-        "flood_event_date": event,
         "flood_visual": (existing or {}).get("flood_visual"),     # set by the verifier, kept
         "available": True,
         "checked_at": now_iso(),
@@ -641,13 +637,12 @@ def main() -> int:
 def summarize(rows: list[dict[str, Any]]) -> None:
     def n(pred) -> int:
         return sum(1 for r in rows if pred(r))
-    log(f"  flood_text_relevant     : {n(lambda r: r['flood_text_relevant'])} "
-        f"(score >= {signals.FLOOD_TEXT_THRESHOLD})")
+    log(f"  flood (score >= {signals.FLOOD_TEXT_THRESHOLD})   : "
+        f"{n(lambda r: r['flood_text_score'] >= signals.FLOOD_TEXT_THRESHOLD)}")
     log(f"  in_ny true/false/unknown: {n(lambda r: r['in_ny'] is True)}/"
         f"{n(lambda r: r['in_ny'] is False)}/{n(lambda r: r['in_ny'] is None)}")
     log(f"  in_nyc true             : {n(lambda r: r['in_nyc'] is True)}")
     log(f"  with coordinates        : {n(lambda r: r['lat'] is not None)}")
-    log(f"  after a known NY flood  : {n(lambda r: r['flood_event_date'])}")
     log(f"  available               : {n(lambda r: r['available'])}")
 
 

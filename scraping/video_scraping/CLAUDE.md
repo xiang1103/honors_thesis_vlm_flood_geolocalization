@@ -13,13 +13,13 @@ root `CLAUDE.md` ("REQUIRED data format for VIDEOS").
 | 1 | Videos have **their own format**; the MyCoast image format applies to static images only | a video is not a photo report; forcing it into `mycoast.json`'s shape did not fit |
 | 2 | **Coordinates are optional.** A video without them is kept (`lat`/`lon` = `null`), never dropped | the goal is flood-relevant video; most uploads carry no location |
 | 3 | **New York is a label, not a filter** (`in_ny` / `in_nyc` true / false / null) | searches aim at NY, but nothing outside it is discarded |
-| 4 | **Keep every video, label it** (`flood_text_score`, `flood_text_relevant`) | thresholds stay changeable without searching again (repo-wide "labels, not filters") |
+| 4 | **Keep every video, label it** (`flood_text_score`) | thresholds stay changeable without searching again (repo-wide "labels, not filters") |
 | 5 | **Flood-relevance threshold is 0.3** (`FLOOD_TEXT_THRESHOLD` in `video_signals.py`) | owner's choice 2026-10-06; was an unstored 0.4. Relabel with `--no-search` (~1 unit / 50 videos) |
 | 6 | **Keep relevance ranking.** Walk every page of every search; when all are walked, **start over** (rolling re-walk, oldest page first). Multi-day cycles are fine | owner rejected a date-sorted "what's new" pass because it gives up relevance order (see "Rejected") |
 | 7 | **The ~500-results-per-query cap is accepted** for now | not a concern yet; date-sliced searches are the known fix if it becomes one |
 | 8 | **Run daily from cron on this server** (03:30 Eastern, after the midnight-Pacific quota reset) | GitHub Actions rejected: all scraper state is gitignored and lives here (see "Rejected") |
 | 9 | **Videos are NOT downloaded, for now.** Only IDs, metadata, thumbnails and the embed link are stored | owner said "don't make download changes yet" (2026-10-06). See "Downloading" |
-| 10 | **Fields trimmed (2026-10-07)**: `channel_id`, `channel_title`, `category_id`, `language`, `license`, `location_basis`, `ny_basis`, `ny_places`, `flood_text_hits`, `queries`, `text` and `api_fields` are no longer stored, in existing data or future scrapes. 23 fields remain (`VIDEO_FIELDS`) | owner's cleanup. Master file 21 MB -> 8 MB. Labels unchanged: channel title, category and the joined text are still read from the API response while labelling, then discarded. Lost: auditing a score from the file, and re-deriving fields without the API (a re-check costs ~1 unit / 50 videos anyway). `queries` is recoverable from the JSONL. Earlier decision to keep `api_fields` (~46% of the file) reversed |
+| 10 | **Fields trimmed (2026-10-07)**: `channel_id`, `channel_title`, `category_id`, `language`, `license`, `location_basis`, `ny_basis`, `ny_places`, `flood_text_hits`, `queries`, `text` and `api_fields` are no longer stored, in existing data or future scrapes. 23 fields remain (`VIDEO_FIELDS`) | owner's cleanup. Master file 21 MB -> 8 MB. Labels unchanged: channel title, category and the joined text are still read from the API response while labelling, then discarded. Lost: auditing a score from the file, and re-deriving fields without the API (a re-check costs ~1 unit / 50 videos anyway). `queries` is recoverable from the JSONL. Earlier decision to keep `api_fields` (~46% of the file) reversed. Second trim the same day: `flood_text_relevant` (derivable: score >= 0.3) and `flood_event_date` dropped too -> 21 fields; the event-date signal is no longer computed |
 | 11 | **Two files: the master keeps every video; a derived flood-only dataset** (`data/youtube_flood_videos.json`) holds ALL flood videos, NY or not (2026-10-07) | dropping non-flood videos from the master would make relabelling cost quota, and the JSONL still lists their IDs, so every night would re-fetch and re-judge them. The derived file is the one to hand out or train on |
 
 ## How YouTube charges, and what that means
@@ -75,7 +75,7 @@ moment**.
 4. **Write**: merge into the JSON by `video_id`; regenerate
    `data/youtube_videos_meta_data.json`.
 5. **Export**: regenerate `data/youtube_flood_videos.json` from the master
-   (`export_flood_videos.is_flood()`: `flood_text_relevant` and `available`)
+   (`export_flood_videos.is_flood()`: `flood_text_score >= 0.3` and `available`)
    and its metadata. Changing the rule needs no API: re-run
    `export_flood_videos.py`. When `flood_visual` exists it belongs in
    `is_flood()`.
@@ -134,7 +134,7 @@ asked to build it, the agreed sketch is:
 
 - `scraping/video_scraping/youtube_download.py`, reading
   `data/youtube_videos.json` and downloading only videos passing a label
-  filter (e.g. `flood_text_relevant`);
+  filter (e.g. the flood-only file);
 - output `data/youtube_videos/<video_id>.mp4` at <= 720p, gitignored, never
   redistributed (a release ships IDs + labels only);
 - per-video `local_path` / `downloaded_at` / `download_error` so re-runs skip

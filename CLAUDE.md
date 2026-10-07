@@ -161,8 +161,6 @@ absent -- never omit a key):
 | `in_ny` | bool or null | `null` = unknown, which is the common case and is NOT the same as `false` |
 | `in_nyc` | bool or null | same |
 | `flood_text_score` | float | signal 1, 0.0-1.0 (see below) |
-| `flood_text_relevant` | bool | `flood_text_score >= FLOOD_TEXT_THRESHOLD` (0.3, `video_signals.py`); recomputed every run |
-| `flood_event_date` | str or null | signal 2: the known NY flood day (`YYYY-MM-DD`) this video was recorded/uploaded within 3 days after |
 | `flood_visual` | dict or null | signal 3, filled by the verifier: per-thumbnail answers + the aggregate. `null` = not yet classified |
 | `available` | bool | the video was public and embeddable at `checked_at` |
 | `checked_at` | str | ISO 8601, last time availability was confirmed |
@@ -173,7 +171,9 @@ Field order is `VIDEO_FIELDS` in `youtube_scrape.py`.
 **Trimmed by the owner, 2026-10-07.** No longer stored, in existing data or
 future scrapes: `channel_id`, `channel_title`, `category_id`, `language`,
 `license`, `location_basis`, `ny_basis`, `ny_places`, `flood_text_hits`,
-`queries`, `text`, `api_fields`. The labels still USE channel title, category
+`queries`, `text`, `api_fields`; then, the same day, `flood_text_relevant`
+(it is just `flood_text_score >= 0.3`; compute it when reading) and
+`flood_event_date`. The labels still USE channel title, category
 and the joined text while they are computed (read from the API response in
 memory), so `flood_text_score` and `in_ny` are unchanged. Consequences: a
 score can no longer be audited from the file (re-run `score_flood_text()` on
@@ -220,12 +220,13 @@ changing the search plan, the walk, or `video_signals.py`. In short:
   answer is cached in `scrape_data/youtube_searches.jsonl` the moment it
   arrives. Relevance-ranked: every page of every search is walked, then
   re-walked oldest first, forever (owner's design, 2026-10-07).
-- Flood relevance is three independent signals, none a filter: (1) text --
+- Flood relevance is two stored signals, neither a filter: (1) text --
   `flood_text_score`, `verify_text.py`'s vocabulary plus video terms, hard
-  negatives (games, CG, trailers, insurance...) zero it; (2) `flood_event_date`
-  -- upload within 3 days after a known NY flood; (3) `flood_visual` -- the VLM
-  over the thumbnails (not built yet). Text says ABOUT a flood; only frames say
-  VISIBLE.
+  negatives (games, CG, trailers, insurance...) zero it; a video counts as a
+  flood video at `>= FLOOD_TEXT_THRESHOLD` (0.3); (2) `flood_visual` -- the
+  VLM over the thumbnails (not built yet). Text says ABOUT a flood; only
+  frames say VISIBLE. (A third, the known-flood-date match, was dropped
+  2026-10-07; the code for it remains in `video_signals.py`, unused.)
 - New York: coordinates if set, else place names (ambiguous ones like
   Queens / Rochester / every MyCoast place need a NY marker), else NY channel;
   `false` only on evidence of elsewhere; otherwise `null`.
@@ -455,8 +456,8 @@ youtube_scrape.py  (search.list -> videos.list -> labels -> thumbnails) -->
         |                                thumbnails fingerprinted into the shared
         |                                data/image_hashes.json
 export_flood_videos.export()  (same run, inside the lock) -->
-    data/youtube_flood_videos.json       flood-only DATASET: flood_text_relevant and
-        |                                available; regenerated in full, never edited
+    data/youtube_flood_videos.json       flood-only DATASET: flood_text_score >= 0.3
+        |                                and available; regenerated in full, never edited
 make_youtube_metadata.refresh()  (same run) -->
     data/youtube_videos_meta_data.json, data/youtube_flood_videos_meta_data.json
                                          counts snapshots (tracked in git)
@@ -623,7 +624,7 @@ News:
 YouTube (2026-10-06, `data/youtube_videos.json`, 9,840 quota units: 2 scrape runs + 2 relabels):
 - 2,761 videos, 11,019 thumbnails (all with digest), uploads 2006-08 to
   2026-10. Page 1 of all 74 searches + page 2 of the first 23 (page 2 still
-  gave ~30 new videos per search). `flood_text_relevant` (>= 0.3): 2,093.
+  gave ~30 new videos per search). flood videos (score >= 0.3): 2,093.
   `in_ny` true/false/null: 2,293/263/205; `in_nyc` true 1,262; 591 with
   uploader coordinates. Not yet VLM-classified, not hand-checked. Videos are
   NOT downloaded (owner's decision pending; see design.md).

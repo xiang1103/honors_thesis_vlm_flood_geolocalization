@@ -1,5 +1,5 @@
 {
-  "generated_at": "2026-10-07T16:53:15+00:00",
+  "generated_at": "2026-10-07T16:57:05+00:00",
   "source_file": "data/youtube_flood_videos.json",
   "note": "One row per YouTube video; no video bytes are stored, only metadata and i.ytimg.com thumbnails. flood_text_score is the text signal only (the video is ABOUT a flood); flood_visual is the VLM over thumbnails (flooding is VISIBLE). in_ny / in_nyc are null when unknown, which is not the same as false.",
   "all": {
@@ -24,7 +24,6 @@
   },
   "flood_text_relevant": 2093,
   "flood_text_threshold": 0.3,
-  "after_known_ny_flood": 1012,
   "flood_visual": {
     "classified": 0,
     "yes": 0

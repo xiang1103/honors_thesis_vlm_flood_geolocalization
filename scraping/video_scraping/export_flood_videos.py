@@ -13,7 +13,8 @@ Same record format as the master (CLAUDE.md "REQUIRED data format for
 VIDEOS"), same order (newest first). Which videos are in it is `is_flood()`,
 owner's choice 2026-10-06/07:
 
-  * `flood_text_relevant` -- the text score passes FLOOD_TEXT_THRESHOLD (0.3);
+  * `flood_text_score >= FLOOD_TEXT_THRESHOLD` (0.3, video_signals.py) -- the
+    text says the video is about a flood;
   * ALL flood videos, New York or not (`in_ny` is kept as a label);
   * `available` -- still public and embeddable; a video deleted since it was
     found cannot be watched, so it is not part of a dataset (it stays in the
@@ -34,14 +35,16 @@ HERE = Path(__file__).resolve().parent
 PROJECT_DIR = HERE.parents[1]
 sys.path.insert(0, str(PROJECT_DIR / "scraping" / "api_based_scraping"))
 sys.path.insert(0, str(PROJECT_DIR))
+sys.path.insert(0, str(HERE))
 from gis_scrape import write_json  # noqa: E402
+from video_signals import FLOOD_TEXT_THRESHOLD  # noqa: E402
 
 DEFAULT_INPUT = PROJECT_DIR / "data" / "youtube_videos.json"
 DEFAULT_OUTPUT = PROJECT_DIR / "data" / "youtube_flood_videos.json"
 
 
 def is_flood(video: dict[str, Any]) -> bool:
-    return bool(video.get("flood_text_relevant")) and bool(video.get("available"))
+    return (video.get("flood_text_score") or 0) >= FLOOD_TEXT_THRESHOLD and bool(video.get("available"))
 
 
 def export(input_path: Path = DEFAULT_INPUT, output_path: Path | None = None) -> Path:
