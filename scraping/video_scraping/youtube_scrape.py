@@ -555,8 +555,16 @@ def main() -> int:
         existing = read_existing(args.output)       # read first: fail before spending quota
         log(f"existing: {len(existing)} videos in {args.output.name}")
 
+        # Searches may not spend the units videos.list will need afterwards:
+        # re-checking every stored video, plus the new ones found (each 100-unit
+        # search page yields at most 50 ids = 1 unit). Without this reserve a
+        # full-budget run finds videos it cannot afford to fetch that day.
+        recheck_units = 0 if args.no_recheck else -(-len(existing) // 50)
+        max_pages = max(0, (args.max_units - recheck_units) // (SEARCH_COST + LIST_COST))
+        yt.budget = args.max_units - recheck_units - max_pages * LIST_COST
         cache = run_searches(None if args.no_search else yt, plan, args.pages,
                              args.search_max_age_days, SEARCH_CACHE)
+        yt.budget = args.max_units
         found = queries_by_video(cache)
         new_ids = [v for v in found if v not in existing]
         recheck = [] if args.no_recheck else list(existing)

@@ -369,6 +369,10 @@ python3 gis_review_server.py            # :8768 GIS/MyCoast, reads gis_flood_ima
 pass `--port` to one of them if both are running.
 
 Long crawls: `./scraping/run_crawl.sh` (tmux, survives disconnect).
+YouTube runs DAILY from cron (installed 2026-10-07, `crontab -l`): 03:30 server time
+(Eastern; the quota resets at midnight Pacific), the routine command above, log
+appended to `scrape_data/logs/youtube-cron.log`. A second run while one holds the
+lock exits at once (`another run holds ...`), so a manual run cannot collide with it.
 MyCoast update: `./scraping/update_mycoast.sh` (scrape -> dedupe -> metadata -> gis refresh,
 stops on first failure, log in `scrape_data/logs/mycoast-update_latest.log`).
 

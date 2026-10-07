@@ -77,6 +77,14 @@ nearly free. Consequences:
 - **Videos.** `data/youtube_videos.json` is keyed by `video_id`, so a video
   found again by a new search is merged into its existing row, not
   duplicated. Its `queries` gain the new search label.
+- **Reserve for `videos.list`.** Searches stop early enough to leave units
+  for re-checking every stored video (`ceil(N/50)`) plus fetching every new
+  id the searches could return (1 unit per search page). Otherwise a
+  full-budget run would find videos it cannot afford to fetch that day. With
+  2,761 stored videos and the default 9,500-unit budget, that allows 93
+  search pages a day.
+- **Runs daily from cron** at 03:30 Eastern, after the midnight-Pacific quota
+  reset. See `CLAUDE.md` Commands.
 - Within a level, the plan is ordered most-specific first (event windows,
   then geo, then the term x place grid).
 - Re-checking every stored video costs `ceil(N/50)` units. For 10,000 videos
