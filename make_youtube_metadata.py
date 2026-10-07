@@ -11,8 +11,9 @@ the end of every run (CLAUDE.md: a scrape regenerates its metadata).
   flood_text_score         videos per score band (signal 1); the cut is the reader's
   flood_visual             classified by the VLM yet, and how many said yes
   in_ny / in_nyc           true / false / unknown -- unknown is the common case
-  ny_basis                 how often each New York signal fired
-  by_category / by_year / top_channels / top_queries
+  by_year                  videos per upload year
+(hard_negative, ny_basis, by_category, top_channels and top_queries were
+removed 2026-10-07 with the record fields they counted -- owner's trim.)
 """
 from __future__ import annotations
 
@@ -76,7 +77,6 @@ def build(rows: list[dict[str, Any]], source_file: str) -> dict[str, Any]:
         "flood_text_score": dict(sorted(Counter(band(r["flood_text_score"]) for r in rows).items())),
         "flood_text_relevant": sum(bool(r.get("flood_text_relevant")) for r in rows),
         "flood_text_threshold": FLOOD_TEXT_THRESHOLD,
-        "hard_negative": sum(bool(r["flood_text_hits"]["negative"]) for r in rows),
         "after_known_ny_flood": sum(bool(r.get("flood_event_date")) for r in rows),
         "flood_visual": {
             "classified": len(visual),
@@ -85,13 +85,9 @@ def build(rows: list[dict[str, Any]], source_file: str) -> dict[str, Any]:
         "in_ny": tri(rows, "in_ny"),
         "in_nyc": tri(rows, "in_nyc"),
         "with_coordinates": sum(r.get("lat") is not None for r in rows),
-        "ny_basis": dict(Counter(b for r in rows for b in r.get("ny_basis") or []).most_common()),
         "thumbnails_without_digest": sum(not t.get("image_sha256")
                                          for r in rows for t in r.get("thumbnails") or []),
-        "by_category": dict(Counter(r.get("category_id") or "(none)" for r in rows).most_common()),
         "by_year": dict(sorted(Counter((r.get("published_utc") or "?")[:4] for r in rows).items())),
-        "top_channels": dict(Counter(r.get("channel_title") for r in rows).most_common(20)),
-        "top_queries": dict(Counter(q for r in rows for q in r.get("queries") or []).most_common(20)),
     }
 
 

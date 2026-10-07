@@ -26,4 +26,5 @@ data/*
 !data/meta_data.json
 !data/mycoast_meta_data.json
 !data/youtube_videos_meta_data.json
+!data/youtube_flood_videos_meta_data.json
 paper_summary/

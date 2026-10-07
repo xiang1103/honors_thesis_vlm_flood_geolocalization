@@ -19,7 +19,8 @@ root `CLAUDE.md` ("REQUIRED data format for VIDEOS").
 | 7 | **The ~500-results-per-query cap is accepted** for now | not a concern yet; date-sliced searches are the known fix if it becomes one |
 | 8 | **Run daily from cron on this server** (03:30 Eastern, after the midnight-Pacific quota reset) | GitHub Actions rejected: all scraper state is gitignored and lives here (see "Rejected") |
 | 9 | **Videos are NOT downloaded, for now.** Only IDs, metadata, thumbnails and the embed link are stored | owner said "don't make download changes yet" (2026-10-06). See "Downloading" |
-| 10 | `api_fields` (the raw API response) is **kept** although it is ~46% of the file | required by the format contract; lets any field be re-derived without the API |
+| 10 | **Fields trimmed (2026-10-07)**: `channel_id`, `channel_title`, `category_id`, `language`, `license`, `location_basis`, `ny_basis`, `ny_places`, `flood_text_hits`, `queries`, `text` and `api_fields` are no longer stored, in existing data or future scrapes. 23 fields remain (`VIDEO_FIELDS`) | owner's cleanup. Master file 21 MB -> 8 MB. Labels unchanged: channel title, category and the joined text are still read from the API response while labelling, then discarded. Lost: auditing a score from the file, and re-deriving fields without the API (a re-check costs ~1 unit / 50 videos anyway). `queries` is recoverable from the JSONL. Earlier decision to keep `api_fields` (~46% of the file) reversed |
+| 11 | **Two files: the master keeps every video; a derived flood-only dataset** (`data/youtube_flood_videos.json`) holds ALL flood videos, NY or not (2026-10-07) | dropping non-flood videos from the master would make relabelling cost quota, and the JSONL still lists their IDs, so every night would re-fetch and re-judge them. The derived file is the one to hand out or train on |
 
 ## How YouTube charges, and what that means
 
@@ -33,7 +34,7 @@ per **request**, not per field or per video:
 
 So ~99% of the quota is searching. One page of 50 fully described videos
 costs 101 units. **No stored field costs extra:** the labels, the NY
-decision, `text`, ids and URLs are computed locally, and thumbnails come from
+decision, ids and URLs are computed locally, and thumbnails come from
 `i.ytimg.com`, which is not the API and needs no key.
 
 ## The two files, and what each one tracks
@@ -73,6 +74,11 @@ moment**.
    fetched and checked, only decodable ones kept.
 4. **Write**: merge into the JSON by `video_id`; regenerate
    `data/youtube_videos_meta_data.json`.
+5. **Export**: regenerate `data/youtube_flood_videos.json` from the master
+   (`export_flood_videos.is_flood()`: `flood_text_relevant` and `available`)
+   and its metadata. Changing the rule needs no API: re-run
+   `export_flood_videos.py`. When `flood_visual` exists it belongs in
+   `is_flood()`.
 
 Numbers: 740 pages for a full walk (74 searches x 10), about 93 pages a night
 at the default 9,500-unit budget, so **one full walk or re-walk takes about 8

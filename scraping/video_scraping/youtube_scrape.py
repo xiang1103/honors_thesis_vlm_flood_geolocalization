@@ -26,6 +26,9 @@ Steps:
                    display; exact repeats within one video are dropped.
   5. write         merged into the existing file (never overwritten),
                    atomically; then data/youtube_videos_meta_data.json.
+  6. export        data/youtube_flood_videos.json, the flood-only dataset,
+                   regenerated from the master (export_flood_videos.py), with
+                   its own metadata file.
 
 Video bytes are never downloaded (YouTube Terms of Service).
 
@@ -61,6 +64,7 @@ sys.path.insert(0, str(HERE))
 from gis_scrape import Client, Regions, exclusive_run, log, write_json  # noqa: E402
 from dedupe import DEFAULT_CACHE, fetch_digests  # noqa: E402
 import video_signals as signals  # noqa: E402
+import export_flood_videos  # noqa: E402
 
 DEFAULT_OUTPUT = PROJECT_DIR / "data" / "youtube_videos.json"
 SEARCH_CACHE = PROJECT_DIR / "scrape_data" / "youtube_searches.jsonl"
@@ -361,14 +365,16 @@ def playable(item: dict[str, Any]) -> bool:
 # Step 3: records
 # --------------------------------------------------------------------------
 
+#: The stored fields, in order. Trimmed by the owner 2026-10-07: channel,
+#: category, language, license, location_basis, ny_basis, ny_places,
+#: flood_text_hits, queries, text and api_fields are no longer stored. The
+#: labels still USE channel title, category and the joined text -- read from
+#: the API response in memory while labelling, then discarded.
 VIDEO_FIELDS = ["video_id", "record_id", "source", "source_url", "embed_url", "title",
-                "description", "tags", "channel_id", "channel_title", "published_utc",
-                "recording_date", "duration_s", "category_id", "language", "license",
-                "thumbnails", "lat", "lon", "location_basis", "in_ny", "in_nyc", "ny_basis",
-                "ny_places", "flood_text_score", "flood_text_hits", "flood_text_relevant",
-                "flood_event_date",
-                "flood_visual", "queries", "text", "available", "checked_at", "api_fields",
-                "scraped_at"]
+                "description", "tags", "published_utc", "recording_date", "duration_s",
+                "thumbnails", "lat", "lon", "in_ny", "in_nyc",
+                "flood_text_score", "flood_text_relevant", "flood_event_date", "flood_visual",
+                "available", "checked_at", "scraped_at"]
 
 DURATION = re.compile(r"^P(?:(\d+)D)?(?:T(?:(\d+)H)?(?:(\d+)M)?(?:(\d+)S)?)?$")
 
@@ -432,30 +438,27 @@ class Labeller:
         return self._regions
 
 
-def build_record(item: dict[str, Any], queries: set[str], labeller: Labeller,
+def build_record(item: dict[str, Any], labeller: Labeller,
                  existing: dict[str, Any] | None) -> dict[str, Any]:
     vid = item["id"]
-    sn, cd, st = item.get("snippet", {}), item.get("contentDetails", {}), item.get("status", {})
+    sn, cd = item.get("snippet", {}), item.get("contentDetails", {})
     rd = item.get("recordingDetails", {})
     source_url = f"https://www.youtube.com/watch?v={vid}"
     tags = sn.get("tags") or []
     title, description = sn.get("title") or "", sn.get("description") or ""
-    text = "\n".join(p for p in (title, " ".join(tags), description) if p)
+    text = "\n".join(p for p in (title, " ".join(tags), description) if p)   # labelling only
 
     loc = rd.get("location") or {}
     lat, lon = loc.get("latitude"), loc.get("longitude")
-    basis = "api" if lat is not None and lon is not None else None
-    if basis is None and existing and existing.get("location_basis") == "overlay_ocr":
-        lat, lon, basis = existing["lat"], existing["lon"], "overlay_ocr"   # not ours to undo
     coord_ny = coord_nyc = None
-    if basis:
+    if lat is not None and lon is not None:
         regions = labeller.regions()
         coord_ny, coord_nyc = regions.in_ny(lat, lon), regions.in_nyc(lat, lon)
 
     published = utc_iso(sn.get("publishedAt"))
     recorded = utc_iso(rd.get("recordingDate"))
     event = signals.match_flood_event(recorded or published, labeller.events)
-    score, hits = signals.score_flood_text(title, tags, description, sn.get("categoryId"))
+    score, _hits = signals.score_flood_text(title, tags, description, sn.get("categoryId"))
     relevant = score >= signals.FLOOD_TEXT_THRESHOLD
     ny = signals.label_new_york(text, sn.get("channelTitle"), labeller.gazetteer,
                                 coord_ny, coord_nyc, event)
@@ -469,27 +472,19 @@ def build_record(item: dict[str, Any], queries: set[str], labeller: Labeller,
         "title": title,
         "description": description,
         "tags": tags,
-        "channel_id": sn.get("channelId"),
-        "channel_title": sn.get("channelTitle"),
         "published_utc": published,
         "recording_date": recorded,
         "duration_s": duration_seconds(cd.get("duration")),
-        "category_id": sn.get("categoryId"),
-        "language": sn.get("defaultAudioLanguage") or sn.get("defaultLanguage"),
-        "license": st.get("license"),
         "thumbnails": thumbnail_objects(vid, source_url, sn.get("thumbnails") or {}),
-        "lat": lat, "lon": lon, "location_basis": basis,
-        **ny,
+        "lat": lat, "lon": lon,
+        "in_ny": ny["in_ny"],
+        "in_nyc": ny["in_nyc"],
         "flood_text_score": score,
-        "flood_text_hits": hits,
         "flood_text_relevant": relevant,
         "flood_event_date": event,
         "flood_visual": (existing or {}).get("flood_visual"),     # set by the verifier, kept
-        "queries": sorted(queries | set((existing or {}).get("queries") or [])),
-        "text": text,
         "available": True,
         "checked_at": now_iso(),
-        "api_fields": item,
         "scraped_at": now_iso(),
     }
     return {k: rec[k] for k in VIDEO_FIELDS}
@@ -611,7 +606,7 @@ def main() -> int:
             if not playable(item) and vid not in existing:
                 unplayable += 1          # never shown, so never written
                 continue
-            rec = build_record(item, found.get(vid, set()), labeller, existing.get(vid))
+            rec = build_record(item, labeller, existing.get(vid))
             rec["available"] = playable(item)
             fresh[vid] = rec
         gone = 0
@@ -625,11 +620,17 @@ def main() -> int:
         fingerprint_thumbnails(list(fresh.values()), args.workers, args.hash_cache)
 
         merged = {**existing, **fresh}
-        rows = sorted(merged.values(), key=lambda r: (r["published_utc"] or "", r["video_id"]), reverse=True)
+        # Every row in VIDEO_FIELDS shape, so a row this run did not rebuild
+        # (quota ran out, or --no-recheck) cannot carry dropped fields forward.
+        rows = sorted(({k: r.get(k) for k in VIDEO_FIELDS} for r in merged.values()),
+                      key=lambda r: (r["published_utc"] or "", r["video_id"]), reverse=True)
         write_json(args.output, rows)
         log(f"wrote {args.output}: {len(existing)} existing + {len(fresh)} fetched -> {len(rows)} videos; "
             f"quota spent this run: {yt.spent} units")
         summarize(rows)
+        # The flood-only dataset, regenerated from the file just written --
+        # inside the lock, so a concurrent run can never export a stale master.
+        export_flood_videos.export(args.output)
 
     # REQUIRED after any change to the data file (CLAUDE.md).
     import make_youtube_metadata
@@ -642,7 +643,6 @@ def summarize(rows: list[dict[str, Any]]) -> None:
         return sum(1 for r in rows if pred(r))
     log(f"  flood_text_relevant     : {n(lambda r: r['flood_text_relevant'])} "
         f"(score >= {signals.FLOOD_TEXT_THRESHOLD})")
-    log(f"  hard negative (score 0) : {n(lambda r: r['flood_text_hits']['negative'])}")
     log(f"  in_ny true/false/unknown: {n(lambda r: r['in_ny'] is True)}/"
         f"{n(lambda r: r['in_ny'] is False)}/{n(lambda r: r['in_ny'] is None)}")
     log(f"  in_nyc true             : {n(lambda r: r['in_nyc'] is True)}")

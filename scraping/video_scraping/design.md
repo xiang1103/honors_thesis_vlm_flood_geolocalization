@@ -82,7 +82,8 @@ nearly free. Consequences:
   is cached as an empty final page; the re-walk retries it in turn.
 - **Videos.** `data/youtube_videos.json` is keyed by `video_id`, so a video
   found again by a new search is merged into its existing row, not
-  duplicated. Its `queries` gain the new search label.
+  duplicated. (Which searches found a video is not stored on it since the
+  2026-10-07 trim; it is in the search cache.)
 - **Reserve for `videos.list`.** Searches stop early enough to leave units
   for re-checking every stored video (`ceil(N/50)`) plus fetching every new
   id the searches could return (1 unit per search page). Otherwise a
@@ -168,7 +169,11 @@ best street-view frame from a dashcam clip. That limitation is accepted for now.
 The signals are recorded independently. **None is a filter**, the same
 invariant as the news verifiers.
 
-### Signal 1: text (`score_flood_text`, `flood_text_score` + `flood_text_hits`)
+### Signal 1: text (`score_flood_text` -> `flood_text_score`, `flood_text_relevant`)
+
+The matched terms (`flood_text_hits`) are computed but no longer stored
+(2026-10-07 trim). To see why a video scored what it did, call
+`video_signals.score_flood_text(title, tags, description, None)`.
 
 It reuses `verify_text.py`'s `STRONG` / `WEAK` / `METAPHOR`, so news and video
 share one flood vocabulary, and adds:
@@ -270,7 +275,9 @@ the same file.
 
 ## Deciding "is this New York" (`label_new_york`)
 
-Every signal that fires is appended to `ny_basis`. The precedence is:
+(`ny_basis` and `ny_places`, which recorded which signal fired and which
+names matched, are no longer stored since the 2026-10-07 trim;
+`label_new_york()` still returns them.) The precedence is:
 
 1. **Coordinates** (`coordinates`). If the uploader set a location, it is
    tested against the Census TIGER NY boundary and the NYC borough boundary
@@ -320,13 +327,11 @@ with the VLM is a possible tie-breaker later.
 
 Coordinates are optional, but kept when they exist:
 
-- `location_basis = "api"`: `recordingDetails.location`, set by the uploader.
-  This is rare.
-- `location_basis = "overlay_ocr"` (reserved, not built): many dashcams burn
-  GPS coordinates and a timestamp into the frame. OCR on the auto-frames
-  could recover per-frame ground truth, the most valuable thing YouTube could
-  give a geolocalization project. The scraper already refuses to overwrite an
-  `overlay_ocr` location on re-scrape.
+- From `recordingDetails.location`, set by the uploader. Rare.
+- Not built: many dashcams burn GPS coordinates and a timestamp into the
+  frame, and OCR on the auto-frames could recover per-frame ground truth.
+  (`location_basis`, which would have recorded which source a location came
+  from, was removed in the 2026-10-07 trim; bring it back with this.)
 
 A place name is never turned into coordinates. Geocoding "Hollis, Queens"
 gives a neighbourhood centroid, which is not where the camera was.
@@ -339,9 +344,9 @@ gives a neighbourhood centroid, which is not where the camera was.
 - **Existing videos** are re-checked every run. A video that has since been
   deleted, made private or blocked keeps its row with `available = false`, so
   the labels spent on it are not lost.
-- **On a re-scrape**, a record is rebuilt from fresh API data. `queries` is
-  unioned with the old value, and `flood_visual` and an `overlay_ocr`
-  location are carried over.
+- **On a re-scrape**, a record is rebuilt from fresh API data, and
+  `flood_visual` is carried over. Rows are written in exactly the
+  `VIDEO_FIELDS` shape, so fields trimmed on 2026-10-07 can never reappear.
 
 ## Calibration (before trusting any threshold)
 
@@ -353,7 +358,8 @@ gives a neighbourhood centroid, which is not where the camera was.
    - precision of `in_ny = true` per basis;
    - how often `in_ny` is null for videos that are in fact NY (the recall
      cost of being conservative);
-   - which queries and plan stages pay (each record's `queries`).
+   - which queries and plan stages pay (join the search cache's
+     `video_ids` per `label` to the labelled videos).
 3. Build signal 3 and measure it against the same labels.
 
 ## First run (2026-10-06, *measured*)

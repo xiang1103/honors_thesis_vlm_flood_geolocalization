@@ -153,33 +153,34 @@ absent -- never omit a key):
 | `title` | str | |
 | `description` | str | verbatim, may be `""` |
 | `tags` | list[str] | uploader tags |
-| `channel_id`, `channel_title` | str | |
 | `published_utc` | str | ISO 8601 UTC, when uploaded |
 | `recording_date` | str or null | ISO 8601, only if the uploader set one |
 | `duration_s` | int | |
-| `category_id` | str | YouTube category (e.g. `"25"` News & Politics) |
-| `language` | str or null | `defaultAudioLanguage` / `defaultLanguage` |
-| `license` | str | `"youtube"` or `"creativeCommon"` |
 | `thumbnails` | list | image objects in the static-image shape (`image_url`, `thumbnail_url`, `scaled_url`, `record_id`, `image_sha256`, `image_dhash`), so the displayability rules and dedupe apply unchanged. The cover first, then auto-frames `hq1`-`hq3`; only thumbnails that decoded are listed, so may be `[]` |
-| `lat`, `lon` | float or null | only from the source's own location metadata (`recordingDetails.location`) or a burned-in dashcam GPS overlay -- never invented from a place name |
-| `location_basis` | str or null | `"api"`, `"overlay_ocr"`, or `null` |
+| `lat`, `lon` | float or null | only from the source's own location metadata (`recordingDetails.location`) -- never invented from a place name |
 | `in_ny` | bool or null | `null` = unknown, which is the common case and is NOT the same as `false` |
 | `in_nyc` | bool or null | same |
-| `ny_basis` | list[str] | every signal that fired: `"coordinates"`, `"gazetteer"`, `"channel"`, `"event_date"` (`"visual"` reserved) |
-| `ny_places` | list[str] | the place names matched, e.g. `["Hollis", "Queens"]` |
 | `flood_text_score` | float | signal 1, 0.0-1.0 (see below) |
 | `flood_text_relevant` | bool | `flood_text_score >= FLOOD_TEXT_THRESHOLD` (0.3, `video_signals.py`); recomputed every run |
-| `flood_text_hits` | dict | `{strong, weak, negative, soft_negative}` -> list of matched terms, so a score can be audited |
 | `flood_event_date` | str or null | signal 2: the known NY flood day (`YYYY-MM-DD`) this video was recorded/uploaded within 3 days after |
 | `flood_visual` | dict or null | signal 3, filled by the verifier: per-thumbnail answers + the aggregate. `null` = not yet classified |
-| `queries` | list[str] | label of every search that returned this video (provenance; also measures which queries pay) |
-| `text` | str | title + description + tags joined, for search / text models |
 | `available` | bool | the video was public and embeddable at `checked_at` |
 | `checked_at` | str | ISO 8601, last time availability was confirmed |
-| `api_fields` | dict | every raw field the API returned, verbatim |
 | `scraped_at` | str | ISO 8601 |
 
 Field order is `VIDEO_FIELDS` in `youtube_scrape.py`.
+
+**Trimmed by the owner, 2026-10-07.** No longer stored, in existing data or
+future scrapes: `channel_id`, `channel_title`, `category_id`, `language`,
+`license`, `location_basis`, `ny_basis`, `ny_places`, `flood_text_hits`,
+`queries`, `text`, `api_fields`. The labels still USE channel title, category
+and the joined text while they are computed (read from the API response in
+memory), so `flood_text_score` and `in_ny` are unchanged. Consequences: a
+score can no longer be audited from the file (re-run `score_flood_text()` on
+title/tags/description to see the matched terms); which search found a video
+is still recoverable from `scrape_data/youtube_searches.jsonl`; the dropped
+metadata keys are listed in `make_youtube_metadata.py`.
+
 
 **Every video must be playable in a browser**, the video counterpart of the
 displayability rule: `status.privacyStatus == "public"`, `status.embeddable ==
@@ -241,6 +242,7 @@ someone has to remember, and never by hand-editing the JSON.
 | `data/mycoast.json` | `data/mycoast_meta_data.json` | `make_mycoast_metadata.py` | step 3 of `scraping/update_mycoast.sh` |
 | `data/news_scrape_results.json`, `data/verified_images_news.json` | `data/meta_data.json` | `make_metadata.py` | `refresh_quietly()` at the end of `scrape.py`, `verify_images_vlm.py`, `dedupe.py` |
 | `data/youtube_videos.json` | `data/youtube_videos_meta_data.json` | `make_youtube_metadata.py` | `refresh()` at the end of `youtube_scrape.py` |
+| `data/youtube_flood_videos.json` (derived) | `data/youtube_flood_videos_meta_data.json` | `make_youtube_metadata.py` | `export()` in `export_flood_videos.py`, called by `youtube_scrape.py` |
 
 Rules:
 
@@ -288,7 +290,8 @@ scraping/         news crawl           scrape.py, adapters.py, run_crawl.sh, des
   api_based_scraping/   government/public APIs (ACTIVE): gis_scrape.py, mycoast_scrape.py
                         superseded GDELT news discovery: news_scrape.py + news_api_design.md
   video_scraping/       videos (ACTIVE): youtube_scrape.py, video_signals.py, design.md,
-                        CLAUDE.md (owner's decisions + how the daily walk works)
+                        export_flood_videos.py, CLAUDE.md (owner's decisions + how the
+                        daily walk works)
 verification/     judging only         verify_text.py, verify_images_vlm.py, dedupe.py
                   MyCoast              dedupe_mycoast.py
                   New York subset      filter_nyc.py  (news -> nyc_scraped_images.json)
@@ -304,7 +307,8 @@ map_countries.py  country choropleth of the news corpus
 data/news_scrape_results.json   THE news corpus — source of truth for the news side
 data/gis_flood_images.json      all four API sources, one row per (page, image)
 data/mycoast.json               MyCoast in depth, one row per REPORT, images nested
-data/youtube_videos.json        YouTube, one row per VIDEO, thumbnails nested
+data/youtube_videos.json        YouTube MASTER: every video found, one row per VIDEO, labelled
+data/youtube_flood_videos.json  the flood-only DATASET, regenerated from the master each run
 scrape_data/      ALL intermediates: per-outlet .jsonl, the verifier's .jsonl,
                   mycoast_pages.jsonl (page cache), crawl logs. Gitignored.
 ```
@@ -361,6 +365,7 @@ python3 scraping/video_scraping/youtube_scrape.py                 # DAILY routin
                                                                   # re-walk oldest first (~8-day cycle); writes metadata
 python3 scraping/video_scraping/youtube_scrape.py --no-search     # re-check + relabel existing, ~free
 python3 scraping/video_scraping/youtube_scrape.py --query "flooded street queens"   # ad hoc
+python3 scraping/video_scraping/export_flood_videos.py            # rebuild the flood-only file alone, no API
 python3 make_youtube_metadata.py                                  # metadata alone
 
 # review sites
@@ -449,8 +454,12 @@ youtube_scrape.py  (search.list -> videos.list -> labels -> thumbnails) -->
     data/youtube_videos.json             one row per VIDEO, merged, newest first;
         |                                thumbnails fingerprinted into the shared
         |                                data/image_hashes.json
+export_flood_videos.export()  (same run, inside the lock) -->
+    data/youtube_flood_videos.json       flood-only DATASET: flood_text_relevant and
+        |                                available; regenerated in full, never edited
 make_youtube_metadata.refresh()  (same run) -->
-    data/youtube_videos_meta_data.json   counts snapshot (tracked in git)
+    data/youtube_videos_meta_data.json, data/youtube_flood_videos_meta_data.json
+                                         counts snapshots (tracked in git)
 ```
 
 Supporting files: `data/image_hashes.json` (fingerprint cache, makes dedupe
