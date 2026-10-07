@@ -1,0 +1,132 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="description" content="Local review interface for the YouTube flood-video dataset">
+    <meta name="color-scheme" content="dark">
+    <title>Flood video review</title>
+    <link rel="stylesheet" href="/shared/styles.css">
+    <link rel="stylesheet" href="gis.css">
+  </head>
+  <body>
+    <header class="site-header">
+      <nav class="site-nav" aria-label="Dataset pages">
+        <a href="/">Photos</a>
+        <a href="/videos.html" aria-current="page">Videos</a>
+      </nav>
+      <div class="header-copy">
+        <p class="eyebrow">VLM flooding dataset · YouTube</p>
+        <h1>Video review</h1>
+        <p id="summary" class="lede" aria-live="polite">Loading catalog…</p>
+      </div>
+    </header>
+
+    <main>
+      <section class="control-panel" aria-label="Video filters">
+        <div class="secondary-filters video-filters">
+          <label>
+            <span>Flood</span>
+            <select id="flood">
+              <option value="flood">Flood videos only</option>
+              <option value="all">All videos</option>
+              <option value="not">Not flood (below threshold)</option>
+            </select>
+          </label>
+          <label>
+            <span>Location</span>
+            <select id="location">
+              <option value="all">Anywhere</option>
+              <option value="nyc">NYC (5 boroughs)</option>
+              <option value="ny">NY State outside NYC</option>
+              <option value="outside">Outside New York</option>
+              <option value="unknown">Location unknown</option>
+              <option value="coords">Has coordinates</option>
+            </select>
+          </label>
+          <label>
+            <span>Your decision</span>
+            <select id="reviewFilter">
+              <option value="all">All videos</option>
+              <option value="unreviewed">Not reviewed yet</option>
+              <option value="useful">Useful</option>
+              <option value="reject">Rejected</option>
+              <option value="unsure">Unsure</option>
+            </select>
+          </label>
+          <label>
+            <span>Sort</span>
+            <select id="sortOrder">
+              <option value="newest">Newest upload first</option>
+              <option value="oldest">Oldest upload first</option>
+              <option value="score">Flood score, high to low</option>
+              <option value="shortest">Shortest first</option>
+            </select>
+          </label>
+          <label>
+            <span>Search</span>
+            <input id="search" type="search" placeholder="title, tags, description" autocomplete="off">
+          </label>
+          <button class="secondary" id="exportReviews" type="button">Export decisions</button>
+        </div>
+      </section>
+
+      <section class="results-heading" aria-live="polite">
+        <div>
+          <p id="resultCount">Loading videos…</p>
+          <p class="browser-note">Thumbnails and the player load from YouTube in your browser; no video is downloaded by this site. Decisions are saved in this browser only.</p>
+        </div>
+        <span id="pageStatus"></span>
+      </section>
+
+      <section id="videoGrid" class="image-grid" aria-label="Dataset videos"></section>
+      <section id="emptyState" class="empty-state" hidden>
+        <h2>No videos match these filters</h2>
+        <p>Try another flood, location or search setting.</p>
+      </section>
+
+      <nav class="pagination" aria-label="Results pages">
+        <button id="previousPage" type="button">← Previous</button>
+        <span id="paginationStatus"></span>
+        <button id="nextPage" type="button">Next →</button>
+      </nav>
+    </main>
+
+    <dialog id="viewer" class="viewer">
+      <button id="closeViewer" class="close-button" type="button" aria-label="Close video viewer">×</button>
+      <div class="viewer-layout">
+        <div class="viewer-media video-media">
+          <div class="player-frame">
+            <iframe id="player" title="YouTube video player"
+                    allow="accelerometer; encrypted-media; gyroscope; picture-in-picture; fullscreen"
+                    ></iframe>
+          </div>
+          <div id="viewerFrames" class="frame-strip" aria-label="YouTube's automatic frames"></div>
+          <div class="viewer-navigation">
+            <button id="previousVideo" type="button" aria-label="Previous matching video">←</button>
+            <span id="viewerPosition"></span>
+            <button id="nextVideo" type="button" aria-label="Next matching video">→</button>
+          </div>
+        </div>
+        <article class="viewer-details">
+          <div id="viewerBadges" class="badges"></div>
+          <h2 id="viewerTitle"></h2>
+          <div id="viewerTags" class="tag-list"></div>
+          <section class="review-panel">
+            <span>Your decision <small>keys 1 · 2 · 3</small></span>
+            <div id="viewerReview"></div>
+          </section>
+          <dl id="viewerMetadata"></dl>
+          <p id="viewerDescription" class="viewer-caption"></p>
+          <div class="viewer-links">
+            <a id="viewerSourceLink" target="_blank" rel="noopener noreferrer">Watch on YouTube ↗</a>
+            <a id="viewerMapLink" target="_blank" rel="noopener noreferrer">Map ↗</a>
+            <a id="viewerStreetViewLink" target="_blank" rel="noopener noreferrer">Street View ↗</a>
+          </div>
+        </article>
+      </div>
+    </dialog>
+
+    <script src="videos.js"></script>
+  </body>
+</html>

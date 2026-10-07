@@ -157,5 +157,19 @@ python3 scraping/video_scraping/youtube_scrape.py --plan        # searches + cos
 python3 scraping/video_scraping/youtube_scrape.py --no-search   # relabel / re-check only, ~60 units
 ```
 
+**Viewing them:** `python3 gis_review_server.py`, then the **Videos** tab
+(`http://127.0.0.1:8768/videos.html`; `gis_review_web/videos.html` +
+`videos.js`). Cards show the cover, duration, flood score, location, title,
+date, tags and description; the detail view embeds YouTube's player
+(`youtube-nocookie.com`, the only frame the site's CSP allows) above the
+three automatic frames. Defaults to flood videos only (score >= the same
+`FLOOD_TEXT_THRESHOLD`); filters for location, review decision, sort and a
+text search. Decisions (useful / reject / unsure, keys 1-3) live in browser
+localStorage under their own key and id scheme (`youtube_review_v1`),
+separate from the photo page's. The server reads the JSON at start-up:
+restart it to see a newer scrape. The player needs a referrer (YouTube error
+153 without one), so the iframe sets its own `referrerPolicy` while the rest
+of the site stays `no-referrer`.
+
 A manual run while the nightly one holds the lock exits at once ("another run
 holds ..."). Manual runs share the same 10,000-unit daily quota.

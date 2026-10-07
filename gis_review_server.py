@@ -13,6 +13,12 @@ directly -- a small thumbnail where the source offers one (MyCoast, Commons),
 falling back to the original.
 
     python3 gis_review_server.py              # http://127.0.0.1:8768
+
+A second page, /videos.html, browses the YouTube flood videos
+(``data/youtube_videos.json``, written by
+``scraping/video_scraping/youtube_scrape.py``): cover thumbnail, title, tags,
+description, labels, and the embedded player in the detail view. Videos are
+never downloaded either; the browser loads YouTube's thumbnails and player.
 """
 
 from __future__ import annotations
@@ -31,6 +37,7 @@ from urllib.parse import quote, unquote, urlparse
 
 PROJECT_DIR = Path(__file__).resolve().parent
 DEFAULT_RESULTS = PROJECT_DIR / "data" / "gis_flood_images.json"
+DEFAULT_VIDEOS = PROJECT_DIR / "data" / "youtube_videos.json"
 STATIC_DIR = PROJECT_DIR / "gis_review_web"
 #: The news site's stylesheet, served as-is so the two sites cannot drift apart
 #: visually. GIS-only rules live in gis_review_web/gis.css.
@@ -39,6 +46,12 @@ SHARED_STYLES = PROJECT_DIR / "image_review_web" / "styles.css"
 #: Decisions live only in the browser's localStorage, keyed by `review_id()`.
 #: Bump this if that function changes, so the page can detect it loudly.
 REVIEW_ID_SCHEME = "gis_review_v1"
+#: Same idea for videos; a different scheme and storage key, so photo and
+#: video decisions can never be mistaken for each other.
+VIDEO_REVIEW_ID_SCHEME = "youtube_review_v1"
+#: The only third-party frame the pages may load: YouTube's privacy-enhanced
+#: player, used by the video detail view.
+VIDEO_EMBED_ORIGIN = "https://www.youtube-nocookie.com"
 
 SOURCE_LABELS = {
     "mycoast": "MyCoast",
@@ -171,8 +184,96 @@ def load_catalog(results_file: Path) -> dict:
     }
 
 
-def make_handler(catalog: dict):
+def video_review_id(source_url: str) -> str:
+    """Identity of one video for HUMAN review decisions (namespaced, like
+    `review_id`, so it never equals the scraper's record_id)."""
+    return hashlib.sha256(f"{VIDEO_REVIEW_ID_SCHEME}\n{source_url}".encode("utf-8")).hexdigest()[:24]
+
+
+def flood_threshold() -> float:
+    """The scraper's own cut, so the page and the flood-only file agree."""
+    import sys
+    sys.path.insert(0, str(PROJECT_DIR / "scraping" / "video_scraping"))
+    from video_signals import FLOOD_TEXT_THRESHOLD
+    return FLOOD_TEXT_THRESHOLD
+
+
+def video_location(row: dict) -> str:
+    if row.get("in_nyc") is True:
+        return "nyc"
+    if row.get("in_ny") is True:
+        return "ny"
+    if row.get("in_ny") is False:
+        return "outside"
+    return "unknown"
+
+
+def load_video_catalog(videos_file: Path) -> dict:
+    """The video page's data. A missing file is not an error -- the photo page
+    must still work before the first YouTube scrape -- the page says so."""
+    empty = {"review_id_scheme": VIDEO_REVIEW_ID_SCHEME, "available": False,
+             "source_file": str(videos_file), "summary": None, "items": []}
+    if not videos_file.is_file():
+        return empty
+    try:
+        rows = json.loads(videos_file.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        raise RuntimeError(f"Could not read {videos_file}: {exc}") from exc
+    threshold = flood_threshold()
+    items: list[dict] = []
+    for row in rows if isinstance(rows, list) else []:
+        source_url = _safe_remote_url(row.get("source_url"))
+        embed_url = _safe_remote_url(row.get("embed_url"))
+        if not source_url or not embed_url.startswith(VIDEO_EMBED_ORIGIN + "/"):
+            continue
+        thumbs = [t for t in row.get("thumbnails") or [] if isinstance(t, dict)
+                  and _safe_remote_url(t.get("image_url"))]
+        score = float(row.get("flood_text_score") or 0)
+        items.append({
+            "id": video_review_id(source_url),
+            "record_id": str(row.get("record_id") or ""),
+            "video_id": str(row.get("video_id") or ""),
+            "title": str(row.get("title") or "Untitled"),
+            "description": str(row.get("description") or "").strip(),
+            "tags": [str(t) for t in row.get("tags") or []],
+            "published": str(row.get("published_utc") or ""),
+            "recording_date": str(row.get("recording_date") or ""),
+            "duration_s": row.get("duration_s"),
+            # The cover is first; the rest are YouTube's automatic frames.
+            "thumbnails": [{"image_url": _safe_remote_url(t.get("image_url")),
+                            "thumbnail_url": _safe_remote_url(t.get("thumbnail_url"))} for t in thumbs],
+            "lat": row.get("lat"),
+            "lon": row.get("lon"),
+            "location": video_location(row),
+            "flood_text_score": round(score, 3),
+            "flood": score >= threshold,
+            "available": bool(row.get("available")),
+            "source_url": source_url,
+            "embed_url": embed_url,
+        })
+    items.sort(key=lambda i: (i["published"], i["id"]), reverse=True)
+    locations = Counter(i["location"] for i in items)
+    return {
+        **empty,
+        "available": True,
+        "summary": {
+            "videos": len(items),
+            "flood": sum(i["flood"] for i in items),
+            "flood_threshold": threshold,
+            "nyc": locations["nyc"],
+            "ny_not_nyc": locations["ny"],
+            "outside_ny": locations["outside"],
+            "location_unknown": locations["unknown"],
+            "with_coordinates": sum(1 for i in items if i["lat"] is not None),
+            "unavailable": sum(1 for i in items if not i["available"]),
+        },
+        "items": items,
+    }
+
+
+def make_handler(catalog: dict, video_catalog: dict):
     payload = json.dumps(catalog, ensure_ascii=False).encode("utf-8")
+    video_payload = json.dumps(video_catalog, ensure_ascii=False).encode("utf-8")
 
     class ReviewHandler(SimpleHTTPRequestHandler):
         def __init__(self, *args, **kwargs):
@@ -182,6 +283,9 @@ def make_handler(catalog: dict):
             path = self.path.split("?", 1)[0]
             if path == "/api/images":
                 self._send(payload, "application/json; charset=utf-8")
+                return
+            if path == "/api/videos":
+                self._send(video_payload, "application/json; charset=utf-8")
                 return
             if path == "/shared/styles.css":
                 self._send(SHARED_STYLES.read_bytes(), "text/css; charset=utf-8")
@@ -204,7 +308,8 @@ def make_handler(catalog: dict):
             self.send_header(
                 "Content-Security-Policy",
                 "default-src 'self'; img-src https: data:; "
-                "style-src 'self'; script-src 'self'; connect-src 'self'",
+                "style-src 'self'; script-src 'self'; connect-src 'self'; "
+                f"frame-src {VIDEO_EMBED_ORIGIN}",
             )
             super().end_headers()
 
@@ -216,6 +321,8 @@ def main() -> None:
     parser.add_argument("--host", default="127.0.0.1")
     parser.add_argument("--port", type=int, default=8768)
     parser.add_argument("--results", type=Path, default=DEFAULT_RESULTS)
+    parser.add_argument("--videos", type=Path, default=DEFAULT_VIDEOS,
+                        help="YouTube videos for /videos.html (optional; default %(default)s)")
     args = parser.parse_args()
 
     if not args.results.is_file():
@@ -228,9 +335,10 @@ def main() -> None:
             parser.error(f"Missing web asset: {required}")
 
     catalog = load_catalog(args.results)
+    video_catalog = load_video_catalog(args.videos)
     summary = catalog["summary"]
     try:
-        server = ThreadingHTTPServer((args.host, args.port), make_handler(catalog))
+        server = ThreadingHTTPServer((args.host, args.port), make_handler(catalog, video_catalog))
     except OSError as exc:
         if exc.errno == errno.EADDRINUSE:
             parser.error(
@@ -244,6 +352,12 @@ def main() -> None:
         f"{summary['nyc']} NYC) at http://{args.host}:{args.port}",
         flush=True,
     )
+    if video_catalog["available"]:
+        vs = video_catalog["summary"]
+        print(f"Video review: {vs['videos']} videos ({vs['flood']} flood) at "
+              f"http://{args.host}:{args.port}/videos.html", flush=True)
+    else:
+        print(f"Video review: no {args.videos} yet; /videos.html will say so.", flush=True)
     print("Press Ctrl+C to stop.", flush=True)
     try:
         server.serve_forever()
