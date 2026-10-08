@@ -140,13 +140,23 @@ function addBadge(parent, text, className = "") {
 function badgesFor(item) {
   const badges = node("div", "badges");
   const score = item.flood_text_score.toFixed(2);
-  addBadge(badges, item.flood ? `FLOOD ${score}` : `NOT FLOOD ${score}`, item.flood ? "yes" : "no");
+  addBadge(badges, item.flood ? "FLOOD" : "NOT FLOOD", item.flood ? "yes" : "no");
+  addBadge(badges, `TEXT ${score}`, item.text_flood ? "" : "warning");
+  addBadge(badges, visualLabel(item), item.visual_flood === true ? "" : "warning");
   const [label, cls] = LOCATION_BADGE[item.location];
   addBadge(badges, label, cls);
   if (!item.available) addBadge(badges, "NO LONGER AVAILABLE", "warning");
   const decision = state.reviews[item.id];
   if (decision) addBadge(badges, `review: ${decision}`, `review-${decision}`);
   return badges;
+}
+
+/** "SEEN 2/3" = flooding visible in 2 of the 3 automatic frames. */
+function visualLabel(item) {
+  if (!item.visual_classified) return "FRAMES: NOT CHECKED";
+  const answered = item.visual_frames.filter(Boolean);
+  if (!answered.length) return "FRAMES: UNREADABLE";
+  return `SEEN ${answered.filter((a) => a === "yes").length}/${answered.length}`;
 }
 
 function tagList(tags, limit) {
@@ -281,8 +291,10 @@ function renderSummary() {
   if (!s) return;
   const reviewed = state.items.filter((item) => state.reviews[item.id]).length;
   ui.summary.textContent =
-    `${s.videos.toLocaleString()} YouTube videos, ${s.flood.toLocaleString()} flood-related `
-    + `(text score ≥ ${s.flood_threshold}): ${s.nyc.toLocaleString()} in NYC, `
+    `${s.videos.toLocaleString()} YouTube videos, ${s.flood.toLocaleString()} flood `
+    + `(text score ≥ ${s.flood_threshold} and flooding seen in at least one frame; `
+    + `${s.visual_classified.toLocaleString()} checked by the model). `
+    + `All videos: ${s.nyc.toLocaleString()} in NYC, `
     + `${s.ny_not_nyc.toLocaleString()} elsewhere in New York State, `
     + `${s.outside_ny.toLocaleString()} outside New York, ${s.location_unknown.toLocaleString()} unknown. `
     + `${reviewed.toLocaleString()} reviewed in this browser.`;
@@ -340,6 +352,7 @@ function renderFrames(item) {
   // frames at ~25/50/75% of the video, not the uploader's chosen image.
   const frames = item.thumbnails.slice(1);
   ui.viewerFrames.replaceChildren(...frames.map((frame, n) => {
+    const answer = item.visual_frames[n];
     const link = externalLink(frame.image_url, "frame", "");
     const image = node("img");
     image.alt = `Automatic frame ${n + 1}`;
@@ -347,6 +360,10 @@ function renderFrames(item) {
     image.loading = "lazy";
     image.src = frame.image_url;
     link.append(image);
+    if (answer) {
+      link.classList.add(answer === "yes" ? "frame-yes" : "frame-no");
+      link.append(node("span", "frame-answer", answer === "yes" ? "flooding" : "no flooding"));
+    }
     return link;
   }));
   ui.viewerFrames.hidden = frames.length === 0;
@@ -371,7 +388,11 @@ function renderViewer() {
     metadataRow("Uploaded", item.published ? item.published.slice(0, 10) : "Unknown"),
     metadataRow("Recorded", item.recording_date ? item.recording_date.slice(0, 10) : "Not set by uploader"),
     metadataRow("Duration", formatDuration(item.duration_s) || "Unknown"),
-    metadataRow("Flood text score", `${item.flood_text_score.toFixed(3)} (${item.flood ? "flood" : "below threshold"})`),
+    metadataRow("Flood", item.flood ? "yes (text and frames)" : "no"),
+    metadataRow("Text score", `${item.flood_text_score.toFixed(3)} (${item.text_flood ? "passes" : "below threshold"})`),
+    metadataRow("Frames", item.visual_classified
+      ? item.visual_frames.map((a, n) => `${n + 1}: ${a || "?"}`).join(" · ")
+      : "not checked yet"),
     metadataRow("Location", LOCATION_BADGE[item.location][0].toLowerCase()),
     metadataRow("Coordinates", hasCoords ? `${Number(item.lat).toFixed(5)}, ${Number(item.lon).toFixed(5)}` : "None"),
     metadataRow("Video id", item.video_id),

@@ -15,13 +15,16 @@ owner's choice 2026-10-06/07:
 
   * `flood_text_score >= FLOOD_TEXT_THRESHOLD` (0.3, video_signals.py) -- the
     text says the video is about a flood;
+  * `flood_visual.flood is True` -- the local VLM saw flooding in at least one
+    of YouTube's three automatic frames (verification/verify_video_frames.py;
+    owner's rule 2026-10-07: if no frame shows flooding, it is not a flood
+    video). A video not yet classified is NOT included until it has been;
   * ALL flood videos, New York or not (`in_ny` is kept as a label);
   * `available` -- still public and embeddable; a video deleted since it was
     found cannot be watched, so it is not part of a dataset (it stays in the
     master with its labels).
 
-When the visual check (`flood_visual`) exists, it belongs in `is_flood()`.
-Changing the rule needs no API calls: re-run this script.
+Changing the rule needs no API calls and no GPU: re-run this script.
 """
 from __future__ import annotations
 
@@ -44,7 +47,9 @@ DEFAULT_OUTPUT = PROJECT_DIR / "data" / "youtube_flood_videos.json"
 
 
 def is_flood(video: dict[str, Any]) -> bool:
-    return (video.get("flood_text_score") or 0) >= FLOOD_TEXT_THRESHOLD and bool(video.get("available"))
+    return ((video.get("flood_text_score") or 0) >= FLOOD_TEXT_THRESHOLD
+            and bool(video.get("available"))
+            and (video.get("flood_visual") or {}).get("flood") is True)
 
 
 def export(input_path: Path = DEFAULT_INPUT, output_path: Path | None = None) -> Path:

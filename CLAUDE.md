@@ -161,7 +161,7 @@ absent -- never omit a key):
 | `in_ny` | bool or null | `null` = unknown, which is the common case and is NOT the same as `false` |
 | `in_nyc` | bool or null | same |
 | `flood_text_score` | float | signal 1, 0.0-1.0 (see below) |
-| `flood_visual` | dict or null | signal 3, filled by the verifier: per-thumbnail answers + the aggregate. `null` = not yet classified |
+| `flood_visual` | dict or null | the visual verdict, written by `verification/verify_video_frames.py`: `{prompt, model, classified_at, frames: [{frame, image_url, answer}], flood}`; `flood` true = flooding seen in >= 1 of the 3 automatic frames, false = none, null = no frame readable. `null` (whole field) = not classified yet |
 | `available` | bool | the video was public and embeddable at `checked_at` |
 | `checked_at` | str | ISO 8601, last time availability was confirmed |
 | `scraped_at` | str | ISO 8601 |
@@ -224,8 +224,12 @@ changing the search plan, the walk, or `video_signals.py`. In short:
   `flood_text_score`, `verify_text.py`'s vocabulary plus video terms, hard
   negatives (games, CG, trailers, insurance...) zero it; a video counts as a
   flood video at `>= FLOOD_TEXT_THRESHOLD` (0.3); (2) `flood_visual` -- the
-  VLM over the thumbnails (not built yet). Text says ABOUT a flood; only
-  frames say VISIBLE. (A third, the known-flood-date match, was dropped
+  local VLM on YouTube's 3 automatic frames, one plain question ("is there
+  any flooding visible?"). Text says ABOUT a flood; only frames say VISIBLE.
+  **A flood video needs both** (owner's rule 2026-10-07): text >= 0.3 AND
+  flooding seen in at least one frame; if no frame shows it, it is not a
+  flood video. Unclassified videos are left out of the flood-only file until
+  classified. (A third, the known-flood-date match, was dropped
   2026-10-07; the code for it remains in `video_signals.py`, unused.)
 - New York: coordinates if set, else place names (ambiguous ones like
   Queens / Rochester / every MyCoast place need a NY marker), else NY channel;
@@ -368,6 +372,8 @@ python3 scraping/video_scraping/youtube_scrape.py                 # DAILY routin
 python3 scraping/video_scraping/youtube_scrape.py --no-search     # re-check + relabel existing, ~free
 python3 scraping/video_scraping/youtube_scrape.py --query "flooded street queens"   # ad hoc
 python3 scraping/video_scraping/export_flood_videos.py            # rebuild the flood-only file alone, no API
+python3 verification/verify_video_frames.py --device-map cuda:6  # visual check, 3 frames/video, GPU;
+                                                                  # resumable, then rebuilds the flood file
 python3 make_youtube_metadata.py                                  # metadata alone
 
 # review sites
@@ -741,9 +747,11 @@ Priority is MyCoast and MyCoast-like sources (owner's direction, 2026-09-28).
    `mycoast_ny_map.html`) behind a script; they are still ad-hoc. Add a
    metadata file for `gis_flood_images.json`.
 5. Near-duplicate detection with a signal that works.
-6. YouTube (first run done 2026-10-06): calibrate signal 1's threshold
-   and the `in_ny` rules against ~150 hand-labelled videos; build signal 3
-   (the VLM over thumbnails -> `flood_visual`); show videos on a review site.
+6. YouTube (first run done 2026-10-06; visual check and review page built
+   2026-10-07): calibrate the text threshold and the visual rule against
+   hand labels from the :8768 Videos page; decide whether
+   `verify_video_frames.py` joins the nightly cron (until then, videos found
+   each night stay out of the flood-only file until it is run).
    Details and open questions in `scraping/video_scraping/design.md`.
 7. Build a small hand-labelled ground-truth set (:8765 / :8768 export
    decisions) so model and prompt changes can be measured instead of guessed.

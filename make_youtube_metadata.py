@@ -82,7 +82,9 @@ def build(rows: list[dict[str, Any]], source_file: str) -> dict[str, Any]:
         "flood_text_threshold": FLOOD_TEXT_THRESHOLD,
         "flood_visual": {
             "classified": len(visual),
-            "yes": sum(v.get("flood") == "yes" for v in visual),
+            "flood_visible": sum(v.get("flood") is True for v in visual),
+            "no_flood_visible": sum(v.get("flood") is False for v in visual),
+            "undecidable": sum(v.get("flood") is None for v in visual),
         },
         "in_ny": tri(rows, "in_ny"),
         "in_nyc": tri(rows, "in_nyc"),

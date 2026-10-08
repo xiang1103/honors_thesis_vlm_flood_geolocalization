@@ -166,6 +166,9 @@ python3 map_countries.py --serve    # also defaults to :8768 -- use --serve <por
 - data is writtent to data/youtube_videos.json 
 - .jsonl file shows which pages we have walked and the videos whose details are not fetched. Every night, the script picks up to which page is not fetched yet. If every page is fetched, it restarts over from page 1 to get new data. 
 
+## Video Filtering 
+- for every video, scraper collects 3 instances of images. Then VLM verify to see at least 1 image is flooding 
+
 
 ## Future Designs 
 

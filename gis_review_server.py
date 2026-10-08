@@ -190,12 +190,15 @@ def video_review_id(source_url: str) -> str:
     return hashlib.sha256(f"{VIDEO_REVIEW_ID_SCHEME}\n{source_url}".encode("utf-8")).hexdigest()[:24]
 
 
-def flood_threshold() -> float:
-    """The scraper's own cut, so the page and the flood-only file agree."""
+def flood_rule():
+    """(text threshold, is_flood) -- the exporter's own rule, so "flood" on
+    this page means exactly what data/youtube_flood_videos.json means."""
     import sys
     sys.path.insert(0, str(PROJECT_DIR / "scraping" / "video_scraping"))
+    sys.path.insert(0, str(PROJECT_DIR / "scraping" / "api_based_scraping"))
+    from export_flood_videos import is_flood
     from video_signals import FLOOD_TEXT_THRESHOLD
-    return FLOOD_TEXT_THRESHOLD
+    return FLOOD_TEXT_THRESHOLD, is_flood
 
 
 def video_location(row: dict) -> str:
@@ -219,7 +222,7 @@ def load_video_catalog(videos_file: Path) -> dict:
         rows = json.loads(videos_file.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError) as exc:
         raise RuntimeError(f"Could not read {videos_file}: {exc}") from exc
-    threshold = flood_threshold()
+    threshold, is_flood = flood_rule()
     items: list[dict] = []
     for row in rows if isinstance(rows, list) else []:
         source_url = _safe_remote_url(row.get("source_url"))
@@ -229,6 +232,7 @@ def load_video_catalog(videos_file: Path) -> dict:
         thumbs = [t for t in row.get("thumbnails") or [] if isinstance(t, dict)
                   and _safe_remote_url(t.get("image_url"))]
         score = float(row.get("flood_text_score") or 0)
+        visual = row.get("flood_visual") if isinstance(row.get("flood_visual"), dict) else None
         items.append({
             "id": video_review_id(source_url),
             "record_id": str(row.get("record_id") or ""),
@@ -246,7 +250,12 @@ def load_video_catalog(videos_file: Path) -> dict:
             "lon": row.get("lon"),
             "location": video_location(row),
             "flood_text_score": round(score, 3),
-            "flood": score >= threshold,
+            "flood": is_flood(row),
+            "text_flood": score >= threshold,
+            # None = not classified yet; otherwise True/False/None per the VLM.
+            "visual_classified": visual is not None,
+            "visual_flood": (visual or {}).get("flood"),
+            "visual_frames": [f.get("answer") for f in (visual or {}).get("frames") or []],
             "available": bool(row.get("available")),
             "source_url": source_url,
             "embed_url": embed_url,
@@ -259,6 +268,8 @@ def load_video_catalog(videos_file: Path) -> dict:
         "summary": {
             "videos": len(items),
             "flood": sum(i["flood"] for i in items),
+            "text_flood": sum(i["text_flood"] for i in items),
+            "visual_classified": sum(i["visual_classified"] for i in items),
             "flood_threshold": threshold,
             "nyc": locations["nyc"],
             "ny_not_nyc": locations["ny"],

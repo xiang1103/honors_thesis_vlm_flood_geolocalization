@@ -21,6 +21,7 @@ root `CLAUDE.md` ("REQUIRED data format for VIDEOS").
 | 9 | **Videos are NOT downloaded, for now.** Only IDs, metadata, thumbnails and the embed link are stored | owner said "don't make download changes yet" (2026-10-06). See "Downloading" |
 | 10 | **Fields trimmed (2026-10-07)**: `channel_id`, `channel_title`, `category_id`, `language`, `license`, `location_basis`, `ny_basis`, `ny_places`, `flood_text_hits`, `queries`, `text` and `api_fields` are no longer stored, in existing data or future scrapes. 23 fields remain (`VIDEO_FIELDS`) | owner's cleanup. Master file 21 MB -> 8 MB. Labels unchanged: channel title, category and the joined text are still read from the API response while labelling, then discarded. Lost: auditing a score from the file, and re-deriving fields without the API (a re-check costs ~1 unit / 50 videos anyway). `queries` is recoverable from the JSONL. Earlier decision to keep `api_fields` (~46% of the file) reversed. Second trim the same day: `flood_text_relevant` (derivable: score >= 0.3) and `flood_event_date` dropped too -> 21 fields; the event-date signal is no longer computed |
 | 11 | **Two files: the master keeps every video; a derived flood-only dataset** (`data/youtube_flood_videos.json`) holds ALL flood videos, NY or not (2026-10-07) | dropping non-flood videos from the master would make relabelling cost quota, and the JSONL still lists their IDs, so every night would re-fetch and re-judge them. The derived file is the one to hand out or train on |
+| 12 | **Visual rule (2026-10-07)**: a flood video needs text >= 0.3 AND flooding visible in at least one of the 3 automatic frames; if none shows flooding, it is not a flood video. One plain prompt, nothing about NY or street level. The cover is not judged | the text signal alone let in obvious non-floods (a Swiss mountain drive past "a Flooded Village", an Alexander the Great history video); the frames are what the footage shows. Chosen over downloading videos or transcripts for now |
 
 ## How YouTube charges, and what that means
 
@@ -75,10 +76,16 @@ moment**.
 4. **Write**: merge into the JSON by `video_id`; regenerate
    `data/youtube_videos_meta_data.json`.
 5. **Export**: regenerate `data/youtube_flood_videos.json` from the master
-   (`export_flood_videos.is_flood()`: `flood_text_score >= 0.3` and `available`)
-   and its metadata. Changing the rule needs no API: re-run
-   `export_flood_videos.py`. When `flood_visual` exists it belongs in
-   `is_flood()`.
+   (`export_flood_videos.is_flood()`: `flood_text_score >= 0.3`, `available`,
+   and `flood_visual.flood is True`) and its metadata. Changing the rule
+   needs no API: re-run `export_flood_videos.py`.
+6. **Visual check** (separate, GPU; NOT in cron yet):
+   `verification/verify_video_frames.py --device-map cuda:<free GPU>` asks
+   the local model "is there any flooding visible?" for each of YouTube's
+   three automatic frames, records them in
+   `scrape_data/youtube_frame_answers.jsonl` (resume ledger, a cache: never
+   delete), writes `flood_visual` back under the scraper's lock and
+   rebuilds the flood-only file. Only new videos cost anything on a re-run.
 
 Numbers: 740 pages for a full walk (74 searches x 10), about 93 pages a night
 at the default 9,500-unit budget, so **one full walk or re-walk takes about 8

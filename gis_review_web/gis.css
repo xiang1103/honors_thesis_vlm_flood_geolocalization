@@ -110,3 +110,19 @@
 @media (max-width: 560px) {
   .video-filters { grid-template-columns: 1fr; }
 }
+
+.frame-strip .frame { position: relative; }
+.frame-strip .frame-yes { border-color: var(--yes); }
+.frame-strip .frame-no { border-color: var(--no-soft); }
+.frame-answer {
+  position: absolute;
+  left: 6px;
+  bottom: 6px;
+  padding: 1px 7px;
+  border-radius: 5px;
+  background: rgba(0, 0, 0, 0.72);
+  color: var(--muted);
+  font-size: 0.72rem;
+  font-weight: 700;
+}
+.frame-yes .frame-answer { color: var(--yes); }
