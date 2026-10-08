@@ -79,13 +79,17 @@ moment**.
    (`export_flood_videos.is_flood()`: `flood_text_score >= 0.3`, `available`,
    and `flood_visual.flood is True`) and its metadata. Changing the rule
    needs no API: re-run `export_flood_videos.py`.
-6. **Visual check** (separate, GPU; NOT in cron yet):
-   `verification/verify_video_frames.py --device-map cuda:<free GPU>` asks
+6. **Visual check** (separate, GPU; its own cron entry at 05:00, after the
+   scrape): `verification/verify_video_frames.py` (default `--device-map
+   free`: the GPU with the most free memory, >= 60 GiB, picked at run time;
+   none free -> it skips the night and the videos wait) asks
    the local model "is there any flooding visible?" for each of YouTube's
    three automatic frames, records them in
    `scrape_data/youtube_frame_answers.jsonl` (resume ledger, a cache: never
    delete), writes `flood_visual` back under the scraper's lock and
-   rebuilds the flood-only file. Only new videos cost anything on a re-run.
+   rebuilds the flood-only file. Only frames without an answer are checked
+   (new videos, earlier fetch failures); with none it exits before loading
+   the model, and the write-back is skipped when nothing changed.
 
 Numbers: 740 pages for a full walk (74 searches x 10), about 93 pages a night
 at the default 9,500-unit budget, so **one full walk or re-walk takes about 8
@@ -158,7 +162,8 @@ Internet Archive, US federal footage (public domain).
 ## Operating it
 
 ```bash
-crontab -l                                         # the daily job (03:30)
+crontab -l                                         # the daily jobs (03:30 scrape, 05:00 visual check)
+tail -30 scrape_data/logs/youtube-frames-cron.log  # what last night's visual check did
 tail -30 scrape_data/logs/youtube-cron.log         # what last night did
 python3 scraping/video_scraping/youtube_scrape.py --plan        # searches + cost, no API calls
 python3 scraping/video_scraping/youtube_scrape.py --no-search   # relabel / re-check only, ~60 units

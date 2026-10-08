@@ -372,8 +372,8 @@ python3 scraping/video_scraping/youtube_scrape.py                 # DAILY routin
 python3 scraping/video_scraping/youtube_scrape.py --no-search     # re-check + relabel existing, ~free
 python3 scraping/video_scraping/youtube_scrape.py --query "flooded street queens"   # ad hoc
 python3 scraping/video_scraping/export_flood_videos.py            # rebuild the flood-only file alone, no API
-python3 verification/verify_video_frames.py --device-map cuda:6  # visual check, 3 frames/video, GPU;
-                                                                  # resumable, then rebuilds the flood file
+python3 verification/verify_video_frames.py                       # visual check of unanswered frames, freest GPU
+                                                                  # (cron, 05:00); then rebuilds the flood file
 python3 make_youtube_metadata.py                                  # metadata alone
 
 # review sites
@@ -390,6 +390,12 @@ YouTube runs DAILY from cron (installed 2026-10-07, `crontab -l`): 03:30 server 
 (Eastern; the quota resets at midnight Pacific), the routine command above, log
 appended to `scrape_data/logs/youtube-cron.log`. A second run while one holds the
 lock exits at once (`another run holds ...`), so a manual run cannot collide with it.
+The visual check runs DAILY from cron too (installed 2026-10-07): 05:00,
+`verification/verify_video_frames.py` with no arguments -- it checks only frames
+not yet answered (new videos, earlier fetch failures), exits without loading the
+model when there are none, picks the GPU with the most free memory at run time
+(>= 60 GiB, else it skips the night), and has its own lock. Log appended to
+`scrape_data/logs/youtube-frames-cron.log`.
 MyCoast update: `./scraping/update_mycoast.sh` (scrape -> dedupe -> metadata -> gis refresh,
 stops on first failure, log in `scrape_data/logs/mycoast-update_latest.log`).
 
@@ -749,9 +755,8 @@ Priority is MyCoast and MyCoast-like sources (owner's direction, 2026-09-28).
 5. Near-duplicate detection with a signal that works.
 6. YouTube (first run done 2026-10-06; visual check and review page built
    2026-10-07): calibrate the text threshold and the visual rule against
-   hand labels from the :8768 Videos page; decide whether
-   `verify_video_frames.py` joins the nightly cron (until then, videos found
-   each night stay out of the flood-only file until it is run).
+   hand labels from the :8768 Videos page. Both steps run nightly from cron
+   (scrape 03:30, visual check 05:00).
    Details and open questions in `scraping/video_scraping/design.md`.
 7. Build a small hand-labelled ground-truth set (:8765 / :8768 export
    decisions) so model and prompt changes can be measured instead of guessed.
