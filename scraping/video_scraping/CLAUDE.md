@@ -159,6 +159,214 @@ Sources that allow downloading, should frames with GPS be needed: Mapillary
 originals with permission (often still carrying GPS), Wikimedia Commons,
 Internet Archive, US federal footage (public domain).
 
+## PLAN: flood scenes inside each video (owner's design, 2026-10-08) — NOT IMPLEMENTED
+
+Nothing in this section exists yet. It is the agreed plan; build it only when
+the owner says to, and confirm the items under "Decisions still open" first.
+
+### Why
+
+A flood video is usually edited: a news package cuts between the anchor, a
+flooded street, an interview, the same street again and a map; a compilation
+cuts between cities. Treated as one sample, the video mixes places and pads
+the flood footage with studio shots, faces and graphics. Geolocalization needs
+footage from one place at a time. The three-frame check already shows the
+symptom: "SEEN 1/3" videos are often packages where one sampled frame happened
+to land on street footage.
+
+### What the final data is (owner's decisions)
+
+- **The data stays videos.** Nothing is cut into clip files or frames in the
+  dataset. Each video entry gains the **time ranges** of its flood footage.
+- **Only flood sections are kept.** Anchor, interview, map and dry-street
+  sections are left out completely -- not stored with `flood: false`.
+- **Sections of the same place are grouped.** A *scene* is one place; it can
+  appear more than once in a video (cut away, cut back), so a scene holds a
+  list of time ranges.
+- **The field goes inside each video entry** (not a separate file joined on
+  `video_id`).
+
+Terms: a **shot** is a continuous stretch between two cuts (one camera
+take); a **scene** is one or more shots of the same place. Frames are used
+only internally, to find cuts and to label shots, and are then discarded.
+
+### Proposed field (to be added to the video contract in the root CLAUDE.md)
+
+```json
+"scenes": [
+  {"scene": 1, "segments": [[12.4, 31.0], [58.2, 70.5]]},
+  {"scene": 2, "segments": [[95.0, 121.3]]}
+]
+```
+
+| key | type | meaning |
+|---|---|---|
+| `scenes` | list or null | `null` = not segmented yet; `[]` = segmented, no flood footage found; otherwise the flood scenes, in order of first appearance |
+| `scene` | int | 1-based, per video |
+| `segments` | list of `[start_s, end_s]` | seconds from the video start, 1 decimal, sorted, non-overlapping; every range shows flooding at this scene's place |
+
+Every segment plays without any clip file:
+`https://www.youtube-nocookie.com/embed/<video_id>?start=<int start>&end=<ceil end>`.
+So the published dataset stays video IDs + timestamps + labels (the Kinetics /
+AVA shape); the downloaded files exist only to produce the timestamps.
+
+### Pipeline (one new step per stage, all resumable, all nightly-cron-able)
+
+1. **Download** (prerequisite; see "Downloading" above -- needs the owner's
+   go-ahead and the root "No video bytes, ever" rule rewritten in the same
+   change). Only videos in the flood-only file; <= 720p; videos longer than a
+   cap (proposed 15 min: livestreams run to 7+ hours) skipped or only their
+   first 15 min fetched. Bookkeeping in a ledger
+   (`scrape_data/youtube_downloads.jsonl`), NOT new fields in the video entry
+   (the owner trimmed the entry on 2026-10-07). Files under
+   `data/youtube_videos/` (gitignored), never committed, never redistributed.
+   Pilot 5 videos first for the "confirm you're not a bot" block.
+2. **Shot detection.** TransNetV2 (small neural model, the standard; handles
+   fades and dissolves; fast on GPU), with PySceneDetect as a CPU fallback.
+   Output per video: the cut times. Shots shorter than ~1 s (flashes,
+   transitions) are merged into a neighbour or dropped.
+3. **Label each shot.** The local VLM on ~3 keyframes per shot (start,
+   middle, end), the same plain question as the frame check: "Is there any
+   flooding visible in this image?" A shot is a flood shot if at least one
+   keyframe says yes (mirrors the owner's 1-of-3 rule for videos). Answers go
+   to a ledger keyed by (video_id, shot start, frame), like
+   `youtube_frame_answers.jsonl`. Non-flood shots are dropped here.
+4. **Group flood shots into scenes.** Image embeddings (e.g. CLIP) of each
+   flood shot's keyframes; shots whose embeddings are close are the same
+   place. Adjacent flood shots separated only by a cut of the same view merge
+   into one segment; non-adjacent matches become extra segments of the same
+   scene. The similarity threshold is set on the pilot, by eye.
+5. **Write back** `scenes` into `data/youtube_videos.json` under the
+   scraper's lock (like `verify_video_frames.merge()`), then rebuild the
+   flood-only file and metadata.
+6. **Export rule** (decision open, see below): once a video is segmented,
+   whether it stays in `youtube_flood_videos.json` should follow from
+   `scenes` -- e.g. "at least one flood scene" -- rather than from the three
+   thumbnails.
+7. **Review site.** The Videos page lists a video's scenes; clicking a
+   segment plays exactly that range (`?start=&end=`), so segmentation errors
+   are checked by watching, not by trusting numbers.
+8. **Metadata.** New keys in `youtube_videos_meta_data.json` /
+   `youtube_flood_videos_meta_data.json` (adding keys is allowed): videos
+   segmented, scenes, segments, flood seconds, scenes per video.
+
+### Owner's decisions, 2026-10-14
+
+- **Batch, then delete.** Videos are downloaded one batch at a time, the
+  batch is processed together (shot detection and VLM labelling across all
+  its videos at once), and the files are **deleted right after**. Only the
+  `scenes` timestamps remain; **no video file is kept** between batches or
+  after the run. (This settles open decision 5, and narrows the root "No
+  video bytes, ever" rule's rewrite to "transient, per batch, deleted after
+  processing" -- still to be written in the root CLAUDE.md when built.)
+- **Experiment first, short videos only.** No long videos in the first
+  runs (settles open decision 4 for now: skip them).
+- **Creator chapters are not used.** The YouTube Data API exposes no
+  segment/chapter field; chapters exist only as "0:00 Title" lines in the
+  description. Measured 2026-10-14: 30 of 4,548 flood-only videos (0.7%)
+  have valid chapters, mostly long explainers (median 571 s vs 60 s overall),
+  and they mark topics ("What Is a Nor'easter?"), not camera cuts. YouTube's
+  auto "key moments" are not in the API. Shot boundaries must come from the
+  pixels.
+
+### Experiments (started 2026-10-14)
+
+`experiments/scene_split/` -- one example video at a time, methods compared by
+eye before anything touches the scraped data. Downloader:
+`scraping/video_scraping/youtube_download.py` (`with downloaded(url) as v:`;
+720p video-only H.264, temp dir deleted on exit, duration cap; needs `yt-dlp`
+and `deno` in the conda env -- Node 18 is too old for yt-dlp's YouTube JS
+challenge). Outputs (results.json, index.html, small keyframes) go to
+`scrape_data/experiments/scene_split/<video_id>/`, gitignored; the video file
+is never kept.
+
+Run 1, PySceneDetect defaults, `xtBb2eU9d2k` (Indian Express NYC flood
+package, 191 s, vertical phone clips on a blurred background, then a mayor's
+press conference and an end card): content 19 shots, adaptive 18, histogram
+19, hash 15, threshold 1 (no fades to black -- it detects fades, not cuts).
+All four cut detectors agree on 11 cuts; hash misses several; adaptive adds 3
+inside 30-48 s the others do not see. Visible failure modes: a 0.6 s flash
+shot at 99.8 s; one CCTV clip split in two at 108.3 s (same view both sides
+-- the scene-grouping step should re-merge it); four quick cuts inside one
+subway station (83.8-94.1 s), which are probably real cuts between phone
+clips of the same place (again a grouping job). Shots 15-19 (press
+conference, end card) are the non-flood footage the flood label must drop.
+
+**Owner's decision after run 1: keep only `content` and `adaptive`**; hash,
+histogram and threshold were removed from the experiment (hash missed real
+cuts, histogram added nothing over content, threshold only finds fades).
+Each run now clears the video's output folder first, so stale keyframes of
+dropped detectors cannot linger.
+
+**Content threshold stays at 27 (the default), owner's decision
+2026-10-14**, after trying 25 on `xtBb2eU9d2k`. Counter-intuitively 25 gave
+FEWER shots (17 vs 19): ContentDetector's default `filter_mode=merge` joins
+cut-like frames less than `min_scene_len` (15 frames, 0.6 s) apart, and in a
+shaky subway clip (87.5-88.5 s, every frame scoring 28-36, plus periodic
+25-27 spikes that look like frame-rate-conversion artifacts) the lower
+threshold kept the merged run alive until 92.1 s, swallowing a real hard cut
+at 89.84 s (score 50.4). Measured alternatives: 27/suppress 21 shots
+(+87.6, +88.2, motion), 25/suppress 24 shots (+31.2, possibly real, and four
+in the subway clip). Lesson: never lower the threshold with the merge filter;
+if more sensitivity is wanted later, pair it with `filter_mode=suppress` and
+let scene grouping re-merge the pieces.
+
+Downloader note: YouTube intermittently answers **HTTP 403** on the media
+stream (its PO-token / SABR experiments; yt-dlp has no PO-token provider
+here). Fresh stream URLs a few seconds later work, so `downloaded()` retries
+the whole extraction up to 3 times on a 403 (seen on the second run of
+`xtBb2eU9d2k`). If 403s become persistent, the fix is a PO-token provider
+plugin for yt-dlp or browser cookies, not more retries.
+
+### Known limits
+
+- **One shot is not always one place.** A dashcam drive is one continuous
+  shot through many streets. It becomes one long segment; splitting it by
+  place would need GPS (often burned into dashcam frames -- OCR, not planned)
+  or fixed time windows. Accept for now.
+- **Grouping can merge different places that look alike** (two flooded
+  residential streets) or split one place filmed from opposite directions.
+  The pilot measures how often.
+- **A flooded shot can be a close-up** (water at a doorstep). The plan asks
+  only "flooding visible", per the owner; a street-level filter on shots is a
+  possible later addition, one more question per keyframe.
+
+### Cost estimate (to be replaced by pilot numbers)
+
+2,145 flood videos (2026-10-08), median 80 s: perhaps 10-40k shots and
+30-100k keyframes, i.e. a few GPU-hours of VLM time at ~0.5 s per frame, plus
+30-60 GB of downloads at <= 720p.
+
+### Pilot before the full run
+
+50 flood videos, mixed (news packages, dashcam, phone clips, one
+compilation). Measure: shots per video, flood shots per video, scenes per
+video, how often grouping is visibly wrong (by watching the segments on the
+review page), download failure rate. Then fix the thresholds and run the rest.
+
+### Decisions still open (ask before building)
+
+1. **Downloading** -- the owner's design is batch-download-process-delete
+   (2026-10-14); still needs the explicit go-ahead to build, the batch size,
+   the "short video" cut-off for the experiment, and the root rule rewrite.
+2. **The `scenes` field** exactly as proposed above (it changes the video
+   contract).
+3. **Export rule** once segmented: flood-only file = videos with >= 1 flood
+   scene? And does `flood_visual` (the 3-frame check) remain as the first
+   filter for what gets downloaded?
+4. ~~Long videos~~ -- skipped for the experiment (2026-10-14).
+5. ~~Downloaded files after segmentation~~ -- deleted after each batch
+   (2026-10-14). Consequence: a re-run with a changed threshold or prompt
+   must download again; the shot/answer ledgers keep everything else.
+
+### Files this would add (none exist yet)
+
+- `scraping/video_scraping/youtube_download.py` -- step 1
+- `verification/segment_video_scenes.py` -- steps 2-5 (judging lives in
+  `verification/`, like `verify_video_frames.py`)
+- ledgers in `scrape_data/`: `youtube_downloads.jsonl`,
+  `youtube_shots.jsonl`, `youtube_shot_answers.jsonl`
+
 ## Operating it
 
 ```bash

@@ -758,6 +758,11 @@ Priority is MyCoast and MyCoast-like sources (owner's direction, 2026-09-28).
    hand labels from the :8768 Videos page. Both steps run nightly from cron
    (scrape 03:30, visual check 05:00).
    Details and open questions in `scraping/video_scraping/design.md`.
+   NEXT (planned 2026-10-08, not implemented): split each flood video into
+   flood-only **scenes** -- a `scenes` field of time ranges per place, non-flood
+   footage left out, data stays videos. Needs downloading (see the "No video
+   bytes" rule). Plan and open decisions: "PLAN: flood scenes inside each
+   video" in `scraping/video_scraping/CLAUDE.md`.
 7. Build a small hand-labelled ground-truth set (:8765 / :8768 export
    decisions) so model and prompt changes can be measured instead of guessed.
    MyCoast's coordinates make it the natural geolocalization evaluation set.
