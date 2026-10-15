@@ -29,6 +29,12 @@ Shots = list[tuple[float, float]]
 #: TransNetV2's own default: a frame is a transition if its probability > 0.5.
 TRANSNET_THRESHOLD = 0.5
 
+#: Device for both models when set (e.g. "cuda:2"); None = TransNetV2 on CPU,
+#: AutoShot on the freest GPU. The scan sets it to its worker's GPU: four
+#: TransNetV2s on CPU at once took 100-400 s per video instead of ~15 s and
+#: drove the shared machine's load to ~550 on 344 cores (2026-10-15).
+DEVICE: str | None = None
+
 
 def transnetv2(path: Path, fps: float) -> Shots:
     """predict_video returns, per frame, the probability that the frame is a
@@ -37,7 +43,7 @@ def transnetv2(path: Path, fps: float) -> Shots:
     transition belong to neither neighbour, so shots can have gaps."""
     import torch
     from transnetv2_pytorch import TransNetV2
-    model = TransNetV2(device="cpu")
+    model = TransNetV2(device=DEVICE or "cpu")
     model.eval()
     with torch.no_grad():
         _, single_frame, _ = model.predict_video(str(path), quiet=True)
@@ -78,7 +84,7 @@ def autoshot(path: Path, fps: float) -> Shots:
     from verify_video_frames import pick_free_gpu   # also sets CUDA_DEVICE_ORDER=PCI_BUS_ID
     from supernet_flattransf_3_8_8_8_13_12_0_16_60 import TransNetV2Supernet
 
-    gpu = pick_free_gpu(AUTOSHOT_MIN_FREE_GIB)
+    gpu = int(DEVICE.split(":")[1]) if DEVICE and DEVICE.startswith("cuda:") else pick_free_gpu(AUTOSHOT_MIN_FREE_GIB)
     device = torch.device(f"cuda:{gpu}" if gpu is not None else "cpu")
     if gpu is not None:
         # The model file builds some tensors with a bare .cuda() (= the

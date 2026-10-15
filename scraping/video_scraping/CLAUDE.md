@@ -399,6 +399,27 @@ found (one model calls them mid-transition, the other puts them in a shot):
 choice for the owner: keep them, or gap frames one model calls transition
 when they sit at a cut both found.
 
+**Per-shot flood check + full scan (owner's rule, 2026-10-15)** --
+`experiments/scene_split/scan_shots.py`. For each union shot, frames at 10% /
+50% / 90% of the shot (shots under 1 s: one middle frame), the frame-check
+question plus "Count only flooding in the scene itself, not in text, maps or
+graphics"; a shot is a flood shot if >= 2 of 3 frames say yes (1-frame
+shots: that frame). Test on the two videos: 25 of 51 shots flood; press
+conferences, interviews, anchors, the weather map and end cards dropped;
+borderline wet surfaces (a wet train platform, slush, a curb puddle) mostly
+rejected -- strict. The scan covers the 4,123 flood-only videos <= 5 min,
+4 workers (`--shard i/4`, GPUs 0/2/4/6, started 2026-10-15 with
+`setsid nohup`, logs `scrape_data/logs/shot-scan-shard<i>.log`); results in
+`scrape_data/youtube_shot_scan/shard_<i>of4.jsonl` (one file per worker --
+NFS), one line per video with BOTH models' raw shots (union can be re-derived
+without re-downloading), every frame's answer and the per-shot verdict.
+Resumable: re-running skips finished videos. Not yet written into
+`data/youtube_videos.json` (waits for scene grouping / the `scenes` field).
+Lesson: the first start ran TransNetV2 on CPU in all four workers -- 100-400
+s per video and a machine load of ~550 on 344 cores; both shot models now
+run on the worker's GPU (3 s each, identical cuts) and each worker is capped
+at 4 CPU threads. ~700 videos/h total after the fix.
+
 **Owner's decision 2026-10-15: PySceneDetect removed entirely** (its content
 detector was the last one kept). The experiment now runs transnetv2 and
 autoshot, plus their derived union; `scenedetect` uninstalled from the env;

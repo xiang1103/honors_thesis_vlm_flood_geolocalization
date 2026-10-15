@@ -196,11 +196,17 @@ thumbnail has `image_sha256`; the metadata's `thumbnails_without_digest` must
 be 0. A missing `maxresdefault.jpg` answers 404 with a grey `image/jpeg`
 placeholder -- a content-type check alone would accept it.
 
-**No video bytes, ever.** Not in the repo and not on disk as a pipeline step:
-downloading (yt-dlp etc.) is against YouTube's Terms of Service, and the
-licensing argument under "Dataset direction" applies equally. Everything the
-pipeline needs -- metadata, thumbnails, the embed -- comes through the API and
-public thumbnail URLs.
+**Video bytes: transient only, never stored (owner's rule, 2026-10-14;
+replaces "No video bytes, ever").** Videos MAY be downloaded, one at a time,
+ONLY to be processed (shot detection, frame sampling) and are deleted right
+after -- `scraping/video_scraping/youtube_download.py`'s `downloaded()` puts
+the file in a temporary directory that is removed when the `with` block ends,
+even on error. No video file is kept on disk, in `data/`, or in the repo;
+only derived timestamps and labels are. Downloading is against YouTube's Terms
+of Service; the owner accepted that risk on exactly these terms. Published
+data stays IDs + timestamps + labels (the Kinetics/AVA shape), playable via
+`embed_url?start=&end=`. Metadata, thumbnails and the embed still come through
+the API and public thumbnail URLs.
 
 **Labels, not filters** -- as with the news verifiers. A video that scores 0,
 has no coordinates, or has `in_ny = null` is still written with its labels; the
