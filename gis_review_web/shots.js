@@ -183,6 +183,10 @@ function badgesFor(item) {
   addBadge(badges, `${item.n_flood}/${item.n_shots} FLOOD SHOTS`, item.n_flood ? "yes" : "no");
   addBadge(badges, `FLOOD ${Math.round(item.flood_s)} OF ${Math.round(item.duration_s)} S`,
     item.flood_share >= 0.5 ? "" : "warning");
+  if (item.ai_video !== null && item.ai_video !== undefined) {
+    addBadge(badges, `${item.ai_video ? "AI VIDEO" : "REAL"} · ${Math.round(100 * item.ai_share)}% AI SHOTS`,
+      item.ai_video ? "no" : "");
+  }
   const [label, cls] = LOCATION_BADGE[item.location] || LOCATION_BADGE.unknown;
   addBadge(badges, label, cls);
   const reviewed = reviewedCount(item);
@@ -245,6 +249,8 @@ function matches(item, words) {
   if (flood === "some" && !item.n_flood) return false;
   if (flood === "none" && item.n_flood) return false;
   if (flood === "mixed" && !(item.n_flood && item.n_flood < item.n_shots)) return false;
+  if (flood === "ai" && item.ai_video !== true) return false;
+  if (flood === "not_ai" && item.ai_video !== false) return false;
   if (ui.location.value !== "all" && item.location !== ui.location.value) return false;
   const review = ui.reviewFilter.value;
   if (review === "unreviewed" && reviewedCount(item)) return false;
@@ -281,6 +287,7 @@ function renderSummary() {
     + `${s.flood_shots.toLocaleString()} judged flood (at least 2 of 3 frames). `
     + `${s.videos_with_flood.toLocaleString()} videos have at least one flood shot; `
     + `${s.flood_hours} of ${s.hours} hours of footage is in flood shots. `
+    + (s.ai_checked ? `${s.ai_videos.toLocaleString()} of ${s.ai_checked.toLocaleString()} AI-checked videos judged AI-generated. ` : "")
     + `${reviewed.toLocaleString()} shots reviewed in this browser.`;
 }
 
@@ -360,6 +367,7 @@ function shotCard(item, shot, index) {
   head.append(node("b", "", `#${index + 1}`),
     node("span", "", `${clock(shot.start)}–${clock(shot.end)} (${(shot.end - shot.start).toFixed(1)} s)`),
     node("span", `badge ${shot.flood ? "yes" : "no"}`, `${shot.flood ? "FLOOD" : "NOT FLOOD"} ${yes}/${shot.answers.length}`));
+  if (shot.ai === "yes") head.append(node("span", "badge no", "AI"));
   card.append(head, shotButtons(item, shot));
   return card;
 }
@@ -392,6 +400,8 @@ function renderViewer() {
     metadataRow("Shots", `${item.n_shots} (TransNetV2 ${item.raw_shot_counts.transnetv2 ?? "?"}, `
       + `AutoShot ${item.raw_shot_counts.autoshot ?? "?"}, union ${item.n_shots})`),
     metadataRow("Flood shots", `${item.n_flood}, ${item.flood_s.toFixed(1)} s (${Math.round(100 * item.flood_share)}% of the video)`),
+    metadataRow("AI check", item.ai_video == null ? "not checked (scanned before 2026-10-15's AI check)"
+      : `${item.ai_video ? "AI-generated" : "real"} -- ${Math.round(100 * item.ai_share)}% of shots judged AI`),
     metadataRow("Video", `${item.width}×${item.height} @ ${item.fps} fps`),
     metadataRow("Text score", item.flood_text_score == null ? "–" : Number(item.flood_text_score).toFixed(3)),
     metadataRow("Uploaded", item.published ? item.published.slice(0, 10) : "unknown"),

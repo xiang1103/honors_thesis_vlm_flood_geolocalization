@@ -18,6 +18,12 @@ yet"), in a pipeline:
     5. ask SHOT_PROMPT of every sampled frame
     6. a shot is a flood shot if >= 2 of its 3 frames say yes (1-frame shots:
        that frame decides). A frame the model could not answer counts as no.
+    6b. AI check (owner, 2026-10-15): ONE question per shot ("is this real
+       camera footage?"; no = AI) with all its frames together (AI video gives itself away over time -- things that
+       morph between frames), after the owner's example AI images if any are
+       in AI_EXAMPLES_DIR. The VIDEO is AI-generated if >= AI_VIDEO_SHARE of
+       its answered shots are; the owner's rule is to drop such a video whole.
+       Both the per-shot answers and the video verdict go in the ledger.
     7. append one line per video to the ledger, flushed at once
     8. save every sampled frame as a small JPEG (FRAME_WIDTH px wide) in
        <ledger-dir>/frames/<video_id>/shot<k>_<j>.jpg, so the review page
@@ -103,6 +109,63 @@ PASS_OF_3 = 2                 # flood shot: >= 2 of 3 frames say yes
 DOWNLOAD_GAP_S = 10.0         # mean pause between downloads, randomised 0.5x-1.5x
 FRAME_WIDTH = 320             # saved review frames
 EXIT_BOT_CHECK = 3            # exit code when YouTube asks to confirm we are not a bot
+
+#: Per-shot AI question (owner, 2026-10-15). Asked the OTHER way round --
+#: "is this real camera footage?", answer "no" = AI -- because asked "is this
+#: AI-generated?" the model said no to obvious AI: on YouTube's auto-frames of
+#: 20 videos their uploaders call AI and 20 real pre-2023 flood videos it
+#: caught 6/20 AI, 0/20 false. This question: 16/20 AI (one of the 4 misses
+#: looks real), 1/20 false. The note on blurred side copies / tilted slideshow
+#: photos removed 2 of 3 false alarms (real phone video read as "edited").
+AI_PROMPT = (
+    "Is this real camera footage of a real place, filmed by a phone, dashcam, news or "
+    "security camera? Answer no if it is AI-generated (Sora, Veo, Kling and similar), "
+    "computer-rendered, animated or a video game. AI video often looks too clean, glossy and "
+    "cinematic, with dramatic lighting, warped or melting details, garbled text, or impossible "
+    "scenes. Shaky, blurry, low-quality, compressed or filtered video and news graphics on real "
+    "footage are still real. Phone videos often show blurred copies of the picture at the "
+    "sides, and slideshows show photos tilted on a blurred background; those edits are not "
+    "AI -- judge the picture itself. Answer with a single word: yes or no.")
+#: AI_PROMPT's answer -> the shot's `ai` label.
+AI_FROM_ANSWER = {"yes": "no", "no": "yes"}
+#: The owner's example AI images (any .jpg/.jpeg/.png/.webp), shown before
+#: every shot's frames. Gitignored; empty or missing = no examples.
+AI_EXAMPLES_DIR = PROJECT / "scrape_data" / "ai_examples"
+AI_EXAMPLES_MAX = 8           # more costs time on every shot
+AI_EXAMPLE_SIDE = 448         # examples are shrunk to this longest side
+#: A video is AI-generated if at least this share of its answered shots are.
+AI_VIDEO_SHARE = 0.5
+
+
+def load_ai_examples(folder: Path = AI_EXAMPLES_DIR) -> list[tuple[str, "Image.Image"]]:
+    from PIL import Image
+    paths = sorted(p for p in folder.glob("*") if p.suffix.lower() in {".jpg", ".jpeg", ".png", ".webp"}) \
+        if folder.is_dir() else []
+    examples = []
+    for path in paths[:AI_EXAMPLES_MAX]:
+        image = Image.open(path).convert("RGB")
+        image.thumbnail((AI_EXAMPLE_SIDE, AI_EXAMPLE_SIDE))
+        examples.append((path.name, image))
+    return examples
+
+
+def ai_parts(examples: list, frames: list) -> list:
+    """The AI question's message: examples (if any), the shot's frames, the prompt."""
+    parts: list = []
+    if examples:
+        parts += ["For reference, these are frames from AI-generated videos:", *(im for _, im in examples)]
+    parts += [f"Now judge this video: {len(frames)} frame(s) from one shot, in time order:", *frames, AI_PROMPT]
+    return parts
+
+
+def ai_video_verdict(shots: list[dict]) -> tuple[float | None, bool | None]:
+    """(share of answered shots judged AI, is the video AI). None when no
+    shot has an answer."""
+    answered = [s["ai"] for s in shots if s.get("ai") in ("yes", "no")]
+    if not answered:
+        return None, None
+    share = sum(a == "yes" for a in answered) / len(answered)
+    return round(share, 3), share >= AI_VIDEO_SHARE
 
 
 def now_iso() -> str:
@@ -281,6 +344,8 @@ def main() -> int:
     t0 = time.monotonic()
     vlm.load()
     print(f"VLM loaded on {device} in {time.monotonic() - t0:.0f} s", flush=True)
+    ai_examples = load_ai_examples()
+    print(f"AI check: {len(ai_examples)} example image(s) from {AI_EXAMPLES_DIR}", flush=True)
 
     q: queue.Queue = queue.Queue(maxsize=2)
     stop = threading.Event()
@@ -315,11 +380,17 @@ def main() -> int:
                             image.resize((FRAME_WIDTH, round(image.height * FRAME_WIDTH / image.width))).save(
                                 path, quality=80)
                     flood = is_flood_shot(answers)
+                    images = [image for _, image in shot["frames"] if image is not None]
+                    ai = (AI_FROM_ANSWER.get(parse_answer(vlm.generate_parts(ai_parts(ai_examples, images))))
+                          if images else None)
                     shots_out.append({"start": shot["start"], "end": shot["end"],
                                       "frames": [{"t": t, "answer": a} for (t, _), a in zip(shot["frames"], answers)],
-                                      "flood": flood})
+                                      "flood": flood, "ai": ai})
+                ai_share, ai_video = ai_video_verdict(shots_out)
                 row.update(item["meta"], prompt=SHOT_PROMPT, model=vlm.name, detect_s=item["detect_s"],
-                           raw_shots=item["raw_shots"], shots=shots_out)
+                           raw_shots=item["raw_shots"], shots=shots_out,
+                           ai_prompt=AI_PROMPT, ai_examples=[name for name, _ in ai_examples],
+                           ai_share=ai_share, ai_video=ai_video, ai_video_share=AI_VIDEO_SHARE)
                 n += 1
                 shots_total += len(shots_out)
                 fl = sum(s["flood"] for s in shots_out)
@@ -327,7 +398,7 @@ def main() -> int:
                 rate = n / (time.monotonic() - t_start)
                 print(f"  [{n}/{len(todo)}] {item['video_id']}: {len(shots_out)} shots, {fl} flood "
                       f"({sum(s['end'] - s['start'] for s in shots_out if s['flood']):.0f} s of "
-                      f"{item['meta']['duration_s']:.0f} s) -- {3600 * rate:.0f} videos/h", flush=True)
+                      f"{item['meta']['duration_s']:.0f} s), AI {ai_share} -> {ai_video} -- {3600 * rate:.0f} videos/h", flush=True)
             fh.write(json.dumps(row, ensure_ascii=False) + "\n")
             fh.flush()
     print(f"=== {'stopped by bot check' if blocked else 'done'}: {n} videos, {shots_total} shots, "

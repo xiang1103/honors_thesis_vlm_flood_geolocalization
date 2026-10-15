@@ -206,8 +206,8 @@ def flood_rule():
     sys.path.insert(0, str(PROJECT_DIR / "scraping" / "video_scraping"))
     sys.path.insert(0, str(PROJECT_DIR / "scraping" / "api_based_scraping"))
     from export_flood_videos import is_flood
-    from video_signals import FLOOD_TEXT_THRESHOLD
-    return FLOOD_TEXT_THRESHOLD, is_flood
+    from video_signals import FLOOD_TEXT_THRESHOLD, ai_by_text
+    return FLOOD_TEXT_THRESHOLD, is_flood, ai_by_text
 
 
 def video_location(row: dict) -> str:
@@ -231,7 +231,7 @@ def load_video_catalog(videos_file: Path) -> dict:
         rows = json.loads(videos_file.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError) as exc:
         raise RuntimeError(f"Could not read {videos_file}: {exc}") from exc
-    threshold, is_flood = flood_rule()
+    threshold, is_flood, ai_by_text = flood_rule()
     items: list[dict] = []
     for row in rows if isinstance(rows, list) else []:
         source_url = _safe_remote_url(row.get("source_url"))
@@ -260,6 +260,7 @@ def load_video_catalog(videos_file: Path) -> dict:
             "location": video_location(row),
             "flood_text_score": round(score, 3),
             "flood": is_flood(row),
+            "ai_text": ai_by_text(row),
             "text_flood": score >= threshold,
             # None = not classified yet; otherwise True/False/None per the VLM.
             "visual_classified": visual is not None,
@@ -324,7 +325,7 @@ def load_shot_catalog(shots_dir: Path, videos_by_id: dict[str, dict]) -> dict:
     for row in read_shot_ledger(shots_dir):
         vid = str(row["video_id"])
         video = videos_by_id.get(vid, {})
-        shots = [{"start": s["start"], "end": s["end"], "flood": bool(s.get("flood")),
+        shots = [{"start": s["start"], "end": s["end"], "flood": bool(s.get("flood")), "ai": s.get("ai"),
                   "answers": [f.get("answer") for f in s.get("frames") or []],
                   "times": [f.get("t") for f in s.get("frames") or []]}
                  for s in row["shots"]]
@@ -351,6 +352,9 @@ def load_shot_catalog(shots_dir: Path, videos_by_id: dict[str, dict]) -> dict:
             "raw_shot_counts": {k: len(v) for k, v in (row.get("raw_shots") or {}).items()},
             "shots": shots,
             "n_shots": len(shots),
+            # AI check (scans from 2026-10-15 on; None = not checked).
+            "ai_share": row.get("ai_share"),
+            "ai_video": row.get("ai_video"),
             "n_flood": sum(s["flood"] for s in shots),
             "flood_s": round(flood_s, 2),
             "flood_share": round(flood_s / duration, 4) if duration else 0.0,
@@ -367,6 +371,8 @@ def load_shot_catalog(shots_dir: Path, videos_by_id: dict[str, dict]) -> dict:
             "hours": round(sum(i["duration_s"] for i in items) / 3600, 2),
             "flood_hours": round(sum(i["flood_s"] for i in items) / 3600, 2),
             "with_frames": sum(i["has_frames"] for i in items),
+            "ai_checked": sum(i["ai_video"] is not None for i in items),
+            "ai_videos": sum(i["ai_video"] is True for i in items),
         },
         "items": items,
     }

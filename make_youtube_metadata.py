@@ -29,7 +29,7 @@ from typing import Any
 
 PROJECT = Path(__file__).resolve().parent
 sys.path.insert(0, str(PROJECT / "scraping" / "video_scraping"))
-from video_signals import FLOOD_TEXT_THRESHOLD  # noqa: E402
+from video_signals import FLOOD_TEXT_THRESHOLD, ai_by_text  # noqa: E402
 DEFAULT_INPUT = PROJECT / "data" / "youtube_videos.json"
 DEFAULT_OUTPUT = PROJECT / "data" / "youtube_videos_meta_data.json"   # == refresh()'s derived default
 
@@ -86,6 +86,9 @@ def build(rows: list[dict[str, Any]], source_file: str) -> dict[str, Any]:
             "no_flood_visible": sum(v.get("flood") is False for v in visual),
             "undecidable": sum(v.get("flood") is None for v in visual),
         },
+        # Owner, 2026-10-15: AI-made by the uploader's own text
+        # (video_signals.ai_by_text); such videos are left out of the flood file.
+        "ai_by_text": sum(ai_by_text(r) for r in rows),
         "in_ny": tri(rows, "in_ny"),
         "in_nyc": tri(rows, "in_nyc"),
         "with_coordinates": sum(r.get("lat") is not None for r in rows),

@@ -1,46 +1,47 @@
 {
-  "generated_at": "2026-10-15T09:12:01+00:00",
+  "generated_at": "2026-10-15T17:53:02+00:00",
   "source_file": "data/youtube_flood_videos.json",
   "note": "One row per YouTube video; no video bytes are stored, only metadata and i.ytimg.com thumbnails. flood_text_score is the text signal only (the video is ABOUT a flood); flood_visual is the VLM over thumbnails (flooding is VISIBLE). in_ny / in_nyc are null when unknown, which is not the same as false.",
   "all": {
-    "videos": 4659,
-    "thumbnails": 18605,
-    "hours": 357.0,
+    "videos": 4611,
+    "thumbnails": 18413,
+    "hours": 356.6,
     "earliest": "2006-08-25",
     "latest": "2026-10-14"
   },
   "available": {
-    "videos": 4659,
-    "thumbnails": 18605,
-    "hours": 357.0,
+    "videos": 4611,
+    "thumbnails": 18413,
+    "hours": 356.6,
     "earliest": "2006-08-25",
     "latest": "2026-10-14"
   },
   "flood_text_score": {
-    "0.2-0.4": 278,
-    "0.4-0.6": 1529,
-    "0.6-0.8": 1636,
-    "0.8-1.0": 1216
+    "0.2-0.4": 253,
+    "0.4-0.6": 1518,
+    "0.6-0.8": 1629,
+    "0.8-1.0": 1211
   },
-  "flood_text_relevant": 4659,
+  "flood_text_relevant": 4611,
   "flood_text_threshold": 0.3,
   "flood_visual": {
-    "classified": 4659,
-    "flood_visible": 4659,
+    "classified": 4611,
+    "flood_visible": 4611,
     "no_flood_visible": 0,
     "undecidable": 0
   },
+  "ai_by_text": 0,
   "in_ny": {
-    "true": 3415,
-    "false": 787,
+    "true": 3371,
+    "false": 783,
     "unknown": 457
   },
   "in_nyc": {
-    "true": 1972,
-    "false": 1705,
+    "true": 1932,
+    "false": 1697,
     "unknown": 982
   },
-  "with_coordinates": 975,
+  "with_coordinates": 959,
   "thumbnails_without_digest": 0,
   "by_year": {
     "2006": 1,
@@ -62,7 +63,7 @@
     "2022": 173,
     "2023": 831,
     "2024": 292,
-    "2025": 572,
-    "2026": 1093
+    "2025": 547,
+    "2026": 1070
   }
 }

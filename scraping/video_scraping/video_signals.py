@@ -13,6 +13,9 @@ reasoning behind each rule: scraping/video_scraping/design.md.
                          `None` means unknown -- the common case -- and is not
                          the same as False.
   match_flood_event(...) signal 2 -- the known NY flood an upload follows.
+  ai_text_hits(...)      the uploader's own words say the PICTURES are AI-made
+                         (or a "What if..." scenario); computed when read, not
+                         stored. A flood video needs none (export_flood_videos).
 
 The vocabulary extends verification/verify_text.py (STRONG / WEAK / METAPHOR)
 so news and video are scored on one set of flood terms.
@@ -151,6 +154,58 @@ def score_flood_text(title: str | None, tags: Iterable[str] | None,
     s -= min(0.15 * len(soft), 0.45)
     s -= min(0.30 * len(metaphor), 0.60)       # "a flood of memories" cancels a title hit
     return round(max(0.0, min(1.0, s)), 3), hits
+
+
+# --------------------------------------------------------------------------
+# AI-generated video, from text (owner's step 1, 2026-10-15)
+# --------------------------------------------------------------------------
+# Measured on the 14,172 videos of 2026-10-15 before writing these. What
+# the uploader says the video IS (title, tags) counts broadly; the
+# description only when it says the PICTURES are AI. Descriptions are full of
+# AI mentions that are not: "narration is an AI-generated voice", "the
+# thumbnail is an AI-generated illustration", "No misleading or AI-generated
+# content has been used", a news channel's generic "#AI" hashtag list --
+# all on real footage. "What if <disaster> hit NYC" titles are hypothetical
+# scenarios (AI or CG), never footage of a real flood.
+
+#: Video generators by name.
+AI_GENERATORS = r"sora|veo\s?\d|kling|hailuo|midjourney|runway\s?(?:ml|gen[- ]?\d?)|pika\s+labs|luma\s+dream\s+machine"
+
+AI_TITLE_TAGS = re.compile(
+    r"(\bai[- ]?(generated|created|video|videos|art|animation|animated|film|movie|short|shorts|cinematic)\b|"
+    r"\b(generated|made|created)\s+(with|by|using)\s+ai\b|"
+    r"#ai(?![rp])\w*|"                    # #ai, #aivideo...; not #airport, #airquality, #aipac
+    rf"^ai$|\b({AI_GENERATORS})\b|\bwhat\s+if\b)",
+    re.I | re.M)
+
+AI_DESCRIPTION = re.compile(
+    r"(\bai[- ]?generated\s+(video|videos|footage|scenes?|visuals?|images?|imagery|clips?|animation|scenario)\b|"
+    r"\b(video|footage|scenes?|visuals?|imagery|clips?|animation)s?\s+(is|are|was|were)\s+"
+    r"(fully\s+|entirely\s+)?ai[- ]?generated\b|"
+    r"\bai\s+visuali[sz]ations?\b|\bphotorealistic\s+ai\b|\bai\s+(video|animation|film|cinematic)\b|"
+    r"#ai(video|videos|art|generated|animation|shorts?|film\w*|cinematic|movie)\b|"
+    rf"\b({AI_GENERATORS})\b)",
+    re.I)
+
+#: Realistic AI video arrives in 2024; the 17 hits before then were all
+#: false (#whatif on a real snow video, an "ai" tag on a timelapse, ...).
+AI_TEXT_SINCE = "2024-01-01"
+
+
+def ai_text_hits(title: str | None, tags: Iterable[str] | None, description: str | None,
+                 published_utc: str | None) -> list[str]:
+    """The matched words if the uploader's text marks the video as AI-made
+    (or a "what if" scenario), else []. Uploads before AI_TEXT_SINCE: []."""
+    if (published_utc or "") < AI_TEXT_SINCE:
+        return []
+    title_tags = f"{title or ''}\n" + "\n".join(tags or [])
+    return ([m.group(0) for m in AI_TITLE_TAGS.finditer(title_tags)]
+            + [m.group(0) for m in AI_DESCRIPTION.finditer(description or "")])
+
+
+def ai_by_text(video: dict[str, Any]) -> bool:
+    return bool(ai_text_hits(video.get("title"), video.get("tags"), video.get("description"),
+                             video.get("published_utc")))
 
 
 # --------------------------------------------------------------------------

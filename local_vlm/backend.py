@@ -183,15 +183,17 @@ class LocalVLM:
 
     # -- inference --------------------------------------------------------
     def _generate(self, image, prompt: str) -> str:
+        return self.generate_parts([image, prompt])
+
+    def generate_parts(self, parts: list) -> str:
+        """One user turn of several images and texts, in order: each item is
+        a PIL image or a str. Used where one question needs several pictures
+        (a shot's frames together, reference examples before them)."""
         import torch
 
-        messages = [{
-            "role": "user",
-            "content": [
-                {"type": "image", "image": image},
-                {"type": "text", "text": prompt},
-            ],
-        }]
+        content = [{"type": "text", "text": p} if isinstance(p, str) else {"type": "image", "image": p}
+                   for p in parts]
+        messages = [{"role": "user", "content": content}]
         with self._gpu_lock:
             inputs = self._processor.apply_chat_template(
                 messages,

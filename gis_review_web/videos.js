@@ -143,6 +143,7 @@ function badgesFor(item) {
   addBadge(badges, item.flood ? "FLOOD" : "NOT FLOOD", item.flood ? "yes" : "no");
   addBadge(badges, `TEXT ${score}`, item.text_flood ? "" : "warning");
   addBadge(badges, visualLabel(item), item.visual_flood === true ? "" : "warning");
+  if (item.ai_text) addBadge(badges, "AI (UPLOADER'S TEXT)", "warning");
   const [label, cls] = LOCATION_BADGE[item.location];
   addBadge(badges, label, cls);
   if (!item.available) addBadge(badges, "NO LONGER AVAILABLE", "warning");

@@ -449,6 +449,36 @@ softer wording. Left: snowmelt-wet streets are split, one boots-in-slush
 frame passes. The first 750 videos keep their v1 answers (each line records
 its prompt).
 
+**AI-generated videos (owner, 2026-10-15).** Two layers; the owner's rule is
+to drop an AI video WHOLE, and declined a hand-labelled test set (a few
+example AI images only).
+1. Text, free, all videos: `ai_text_hits()` / `ai_by_text()` in
+   `video_signals.py` -- AI-video words in title/tags (#ai, AI generated, AI
+   animation, Sora/Veo/Kling..., "What if ..."), and in the description only
+   phrases saying the PICTURES are AI ("AI visualizations", "video is
+   AI-generated"...), never "AI voice", "AI thumbnail", a denial, or a news
+   channel's generic #AI. Uploads before 2024-01-01 never count (all 17
+   earlier hits were false). Computed when read, NOT stored (no schema
+   change); `is_flood()` excludes these, so the flood file went 4,659 ->
+   4,611 (48 out), the master keeps them, metadata counts `ai_by_text`
+   (110 in the master). The Videos page badges them.
+2. Model, per shot, in the scan: `AI_PROMPT` in `scan_shots.py`, ONE question
+   per shot with its frames together, asked as "is this real camera
+   footage?" (no = AI). Video is AI if >= `AI_VIDEO_SHARE` (0.5) of answered
+   shots are; ledger keeps every shot's `ai` plus `ai_share` / `ai_video`.
+   Owner's example images go in `scrape_data/ai_examples/` (gitignored,
+   <= 8, shown before each shot's frames). Smoke test on YouTube's 3
+   auto-frames, 20 videos their uploaders call AI vs 20 real pre-2023 flood
+   videos: "is this AI-generated?" caught 6/20 AI (0 false); the "real
+   footage?" wording 18/20 but 3/20 false -- all real phone video with blurred
+   side copies or a tilted-photo slideshow; with a note on those, 16/20 AI
+   (one miss looks real) and 1/20 false. Not yet used to drop anything
+   from the data: the verdict lives in the ledger until the scan results are
+   merged (with the `scenes` field). Owner's decision 2026-10-15: keep
+   `ai_video: true` in the ledger for now; once the WHOLE scan is done, remove
+   those videos (from the flood-only file; the master keeps every video) in
+   one pass -- not video by video during the scan.
+
 **Review page, 2026-10-15:** `gis_review_server.py` :8768 `/shots.html` -- one
 card per scanned video with its shots on a timeline (flood / not flood /
 gap); the viewer lists every shot with the frames the model judged and its

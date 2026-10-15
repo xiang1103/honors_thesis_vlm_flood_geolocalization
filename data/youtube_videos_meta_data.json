@@ -1,5 +1,5 @@
 {
-  "generated_at": "2026-10-15T09:12:02+00:00",
+  "generated_at": "2026-10-15T17:53:03+00:00",
   "source_file": "data/youtube_videos.json",
   "note": "One row per YouTube video; no video bytes are stored, only metadata and i.ytimg.com thumbnails. flood_text_score is the text signal only (the video is ABOUT a flood); flood_visual is the VLM over thumbnails (flooding is VISIBLE). in_ny / in_nyc are null when unknown, which is not the same as false.",
   "all": {
@@ -31,6 +31,7 @@
     "no_flood_visible": 7724,
     "undecidable": 10
   },
+  "ai_by_text": 110,
   "in_ny": {
     "true": 9816,
     "false": 2202,
