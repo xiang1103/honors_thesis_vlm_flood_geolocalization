@@ -399,6 +399,13 @@ found (one model calls them mid-transition, the other puts them in a shot):
 choice for the owner: keep them, or gap frames one model calls transition
 when they sit at a cut both found.
 
+**Owner's decision 2026-10-15: PySceneDetect removed entirely** (its content
+detector was the last one kept). The experiment now runs transnetv2 and
+autoshot, plus their derived union; `scenedetect` uninstalled from the env;
+its rows stripped from both result pages (rebuilt from results.json). Every
+cut the content detector found on the two test videos is also in the union,
+except 89.0 / 91.9 s inside `xtBb2eU9d2k`'s subway montage (uncertain).
+
 Downloader note: YouTube intermittently answers **HTTP 403** on the media
 stream (its PO-token / SABR experiments; yt-dlp has no PO-token provider
 here). Fresh stream URLs a few seconds later work, so `downloaded()` retries

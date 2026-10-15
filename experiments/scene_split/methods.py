@@ -4,8 +4,6 @@ A method maps a local video file to a list of shots [(start_s, end_s), ...].
 `cuts()` turns shots into cut times (the start of every shot but the first).
 
 Kept (owner, 2026-10-14):
-  content     PySceneDetect ContentDetector, threshold 27 (the default; 25 was
-              tried and LOST real cuts with the default merge filter)
   transnetv2  TransNetV2, PyTorch port `transnetv2-pytorch` (original weights),
               CPU, transition probability > 0.5 (its default)
 Added (owner, 2026-10-15):
@@ -16,10 +14,11 @@ Added (owner, 2026-10-15):
               mirror, loaded with weights_only=True). Authors' inference
               exactly: 48x27 frames, 100-frame windows, middle 50 kept, sigmoid,
               their best-F1 threshold 0.296. Freest GPU if one has room, else CPU.
-Dropped: PySceneDetect adaptive, hash, histogram, threshold; OmniShotCut v1.5
-(owner, 2026-10-15, after it missed more cuts than TransNetV2 on both test
-videos) -- see
-scraping/video_scraping/CLAUDE.md, "Experiments".
+Dropped (owner's decisions; reasons in scraping/video_scraping/CLAUDE.md,
+"Experiments"): PySceneDetect entirely -- adaptive, hash, histogram and
+threshold on 2026-10-14, content (threshold 27) on 2026-10-15, once the
+transnetv2 + autoshot union covered every cut it had found; OmniShotCut v1.5
+(2026-10-15, missed more cuts than TransNetV2 on both test videos).
 """
 from __future__ import annotations
 
@@ -29,12 +28,6 @@ Shots = list[tuple[float, float]]
 
 #: TransNetV2's own default: a frame is a transition if its probability > 0.5.
 TRANSNET_THRESHOLD = 0.5
-
-
-def content(path: Path, fps: float) -> Shots:
-    from scenedetect import ContentDetector, detect
-    return [(round(s.get_seconds(), 2), round(e.get_seconds(), 2))
-            for s, e in detect(str(path), ContentDetector(threshold=27))]
 
 
 def transnetv2(path: Path, fps: float) -> Shots:
@@ -117,7 +110,6 @@ def autoshot(path: Path, fps: float) -> Shots:
 
 #: name -> (description, function). Order is display order.
 METHODS = {
-    "content": ("PySceneDetect ContentDetector(threshold=27) -- hard cuts", content),
     "transnetv2": (f"TransNetV2 (neural, PyTorch port, CPU), transition probability > "
                    f"{TRANSNET_THRESHOLD} -- cuts and gradual transitions", transnetv2),
     "autoshot": (f"AutoShot (CVPRW 2023, NAS-designed, trained on short videos), transition probability > "

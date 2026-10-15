@@ -8,8 +8,6 @@ example by eye. This script:
   1. downloads the video ONCE (youtube_download.downloaded -- a temporary file,
      deleted when the script ends, owner's rule 2026-10-14);
   2. runs each method on that same file:
-       content     PySceneDetect ContentDetector -- sudden colour/brightness
-                   change between frames (hard cuts)
        transnetv2  TransNetV2, a neural shot-boundary model trained on hard
                    cuts AND gradual transitions (fades, dissolves, wipes);
                    PyTorch port `transnetv2-pytorch` with the original
@@ -21,11 +19,9 @@ example by eye. This script:
        union       (derived, no model run) transnetv2 + autoshot combined:
                    split wherever either splits, keep every real shot, drop
                    only 0 s shots (methods.combine)
-     (PySceneDetect's hash, histogram and threshold detectors were tried on
-     xtBb2eU9d2k and dropped by the owner, 2026-10-14: hash missed real cuts,
-     histogram added nothing over content, threshold only finds fades. Its
-     adaptive detector was dropped the same day after the TransNetV2 run: its
-     only unique cuts, 34-46 s, were unconfirmed, and it missed the 71.5 s cut)
+     (PySceneDetect -- all five of its detectors -- and OmniShotCut were tried
+     and dropped by the owner; see scraping/video_scraping/CLAUDE.md,
+     "Experiments")
   3. grabs the middle frame of every shot as a small JPEG keyframe;
   4. writes, under scrape_data/experiments/scene_split/<video_id>/ (gitignored):
        results.json   every detector's shots, settings and run time
