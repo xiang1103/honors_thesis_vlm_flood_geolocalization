@@ -362,6 +362,43 @@ omnishotcut has not caught any cut both others missed.**
 **Owner's decision 2026-10-15: OmniShotCut removed** (code, package, cached
 weights, and its rows in the two result pages, rebuilt from results.json).
 
+Run 5, **AutoShot added** (2026-10-15; Zhu et al., CVPRW 2023, MIT; code and
+checkpoint `ckpt_0_200_0.pth` in `/home/liu47/models/AutoShot`, outside the
+repo -- checkpoint from the README's community Google Drive mirror, loaded
+with `weights_only=True`, all 90 tensors match; authors' inference: 48x27
+frames, 100-frame windows keeping the middle 50, threshold 0.296; freest GPU,
+~6-8 s per video; env gained `einops`, `gdown`). It found **every cut
+transnetv2 found on both videos, plus 30.6 s and 71.5 s on `xtBb2eU9d2k`
+(previously each needed a different method) and two cuts no method had
+found: 42.2 s on `i-U6LeACMnk` (snowy grate close-up -> boots in slush) and
+102.2 s on `xtBb2eU9d2k` (rainy street, red car -> CCTV manhole geyser)**.
+Misses: content's 89.0 / 91.9 s inside the subway montage (also missed by
+transnetv2; uncertain). Noise: two 1-frame slivers inside the 30.6 s
+dissolve (a min-shot-length filter removes them). On these two videos
+AutoShot alone covers what needed content + transnetv2 together.
+
+**Owner's combining rule: UNION of transnetv2 + autoshot (2026-10-15)** --
+neither model wins outright (each catches cuts the other misses), so both run
+on every video and `methods.combine()` merges them; shown as the "union" row
+of the comparison pages. Owner's requirements: "more shots the better, never
+lose a shot":
+- split wherever EITHER model splits; edges from different models within
+  0.2 s are the same cut and count once; edges from the same model are
+  never merged (a genuine short shot survives);
+- a stretch is a gap only if BOTH models leave it out;
+- short shots are NOT merged into neighbours; only 1-frame ("0 s") shots
+  are removed (measured in frames: a 0.05 s cut-off let 1-frame shots
+  through at 24 fps);
+- rejected: "keep whichever model returns more shots" (more shots can be
+  noise, and it throws away the other model's unique real cuts); averaging
+  the two models' per-frame probabilities (loses cuts only one sees strongly).
+Result: `i-U6LeACMnk` 27 shots (autoshot 26), `xtBb2eU9d2k` 24 (autoshot 22).
+Known side effect: 2-3-frame pieces made of blend frames at cuts BOTH models
+found (one model calls them mid-transition, the other puts them in a shot):
+31.4 s on `i-U6LeACMnk`; 30.7, 30.8, 83.9, 125.4 s on `xtBb2eU9d2k`. Open
+choice for the owner: keep them, or gap frames one model calls transition
+when they sit at a cut both found.
+
 Downloader note: YouTube intermittently answers **HTTP 403** on the media
 stream (its PO-token / SABR experiments; yt-dlp has no PO-token provider
 here). Fresh stream URLs a few seconds later work, so `downloaded()` retries

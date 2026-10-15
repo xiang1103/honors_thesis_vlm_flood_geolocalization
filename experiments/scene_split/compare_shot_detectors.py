@@ -16,6 +16,11 @@ example by eye. This script:
                    weights, run on CPU (it sees 48x27 frames; the shared GPUs
                    are left alone). Frames it labels as "transition" are left
                    out of both neighbouring shots, so its shots can have gaps.
+       autoshot    AutoShot (CVPRW 2023), same model family as TransNetV2,
+                   trained on short-form video; authors' threshold 0.296.
+       union       (derived, no model run) transnetv2 + autoshot combined:
+                   split wherever either splits, keep every real shot, drop
+                   only 0 s shots (methods.combine)
      (PySceneDetect's hash, histogram and threshold detectors were tried on
      xtBb2eU9d2k and dropped by the owner, 2026-10-14: hash missed real cuts,
      histogram added nothing over content, threshold only finds fades. Its
@@ -172,8 +177,17 @@ def main() -> int:
             "run_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
             "detectors": [],
         }
-        for name, (description, _) in methods.METHODS.items():
-            shots, seconds = run_detector(video.path, name, video.fps or 25.0, video.duration_s)
+        shots_by = {}
+        for name, (description, _) in [*methods.METHODS.items(),
+                                       *((n, (d, None)) for n, (d, _, _) in methods.DERIVED.items())]:
+            if name in methods.DERIVED:
+                t0 = time.monotonic()
+                _, inputs, fn = methods.DERIVED[name]
+                shots = fn(*(shots_by[i] for i in inputs), fps=video.fps or 25.0)
+                seconds = time.monotonic() - t0
+            else:
+                shots, seconds = run_detector(video.path, name, video.fps or 25.0, video.duration_s)
+            shots_by[name] = shots
             keyframes = save_keyframes(video.path, shots, out / "keyframes", name)
             result["detectors"].append({"name": name, "description": description, "seconds": round(seconds, 2),
                                         "shots": shots, "keyframes": keyframes})
