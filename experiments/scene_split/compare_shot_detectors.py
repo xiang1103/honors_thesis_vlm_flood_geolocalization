@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Experiment: split ONE YouTube video into shots with each PySceneDetect detector.
+"""Experiment: split ONE YouTube video into shots with several detectors, side by side.
 
 Step 1 of the "flood scenes" plan (scraping/video_scraping/CLAUDE.md): before
 anything runs on the scraped data, compare shot-detection methods on a single
@@ -7,13 +7,20 @@ example by eye. This script:
 
   1. downloads the video ONCE (youtube_download.downloaded -- a temporary file,
      deleted when the script ends, owner's rule 2026-10-14);
-  2. runs the two PySceneDetect detectors the owner kept (2026-10-14) on that
-     same file, default settings:
-       content    sudden colour/brightness change between frames (hard cuts)
-       adaptive   the same, relative to recent motion (fewer false cuts on pans)
-     (hash, histogram and threshold were tried on xtBb2eU9d2k and dropped:
-     hash missed real cuts, histogram added nothing over content, threshold
-     only finds fades to black)
+  2. runs each method on that same file:
+       content     PySceneDetect ContentDetector -- sudden colour/brightness
+                   change between frames (hard cuts)
+       transnetv2  TransNetV2, a neural shot-boundary model trained on hard
+                   cuts AND gradual transitions (fades, dissolves, wipes);
+                   PyTorch port `transnetv2-pytorch` with the original
+                   weights, run on CPU (it sees 48x27 frames; the shared GPUs
+                   are left alone). Frames it labels as "transition" are left
+                   out of both neighbouring shots, so its shots can have gaps.
+     (PySceneDetect's hash, histogram and threshold detectors were tried on
+     xtBb2eU9d2k and dropped by the owner, 2026-10-14: hash missed real cuts,
+     histogram added nothing over content, threshold only finds fades. Its
+     adaptive detector was dropped the same day after the TransNetV2 run: its
+     only unique cuts, 34-46 s, were unconfirmed, and it missed the 71.5 s cut)
   3. grabs the middle frame of every shot as a small JPEG keyframe;
   4. writes, under scrape_data/experiments/scene_split/<video_id>/ (gitignored):
        results.json   every detector's shots, settings and run time
@@ -25,7 +32,7 @@ example by eye. This script:
 The video file itself is never kept. The keyframes are small stills for
 looking at; delete the folder when done.
 
-    python3 experiments/scene_split/pyscenedetect_compare.py https://www.youtube.com/watch?v=xtBb2eU9d2k
+    python3 experiments/scene_split/compare_shot_detectors.py https://www.youtube.com/watch?v=xtBb2eU9d2k
     python3 -m http.server 8790 --directory scrape_data/experiments/scene_split/xtBb2eU9d2k
     # then open http://127.0.0.1:8790/  (served over http so the YouTube player gets a referrer)
 """
@@ -42,34 +49,17 @@ from pathlib import Path
 PROJECT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(PROJECT / "scraping" / "video_scraping"))
 from youtube_download import downloaded  # noqa: E402
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import methods  # noqa: E402  -- the methods under test (methods.METHODS)
 
 OUT_ROOT = PROJECT / "scrape_data" / "experiments" / "scene_split"
 KEYFRAME_WIDTH = 320
 
 
-def detectors():
-    """(name, description, detector factory). Defaults throughout: this run is
-    the baseline; tuning comes after looking at it."""
-    from scenedetect import AdaptiveDetector, ContentDetector
-    return [
-        # threshold 27 (the default), owner's choice 2026-10-14 after trying 25:
-        # with the default merge filter, 25 LOST the real cuts at 89.0 / 89.8 s
-        # on xtBb2eU9d2k (shaky footage kept the merged run going); see
-        # scraping/video_scraping/CLAUDE.md, "Experiments".
-        ("content", "ContentDetector(threshold=27) -- hard cuts", ContentDetector),
-        ("adaptive", "AdaptiveDetector(adaptive_threshold=3.0) -- cuts, motion-aware", AdaptiveDetector),
-    ]
-
-
-def run_detector(path: Path, factory, duration_s: float) -> tuple[list[tuple[float, float]], float]:
-    from scenedetect import detect
+def run_detector(path: Path, name: str, fps: float, duration_s: float) -> tuple[methods.Shots, float]:
     t0 = time.monotonic()
-    scenes = detect(str(path), factory())
-    elapsed = time.monotonic() - t0
-    shots = [(round(s.get_seconds(), 2), round(e.get_seconds(), 2)) for s, e in scenes]
-    if not shots:                              # no cut found: the whole video is one shot
-        shots = [(0.0, round(duration_s, 2))]
-    return shots, elapsed
+    shots = methods.run(name, path, fps, duration_s)
+    return shots, time.monotonic() - t0
 
 
 def save_keyframes(path: Path, shots: list[tuple[float, float]], out_dir: Path, prefix: str) -> list[str]:
@@ -182,8 +172,8 @@ def main() -> int:
             "run_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
             "detectors": [],
         }
-        for name, description, factory in detectors():
-            shots, seconds = run_detector(video.path, factory, video.duration_s)
+        for name, (description, _) in methods.METHODS.items():
+            shots, seconds = run_detector(video.path, name, video.fps or 25.0, video.duration_s)
             keyframes = save_keyframes(video.path, shots, out / "keyframes", name)
             result["detectors"].append({"name": name, "description": description, "seconds": round(seconds, 2),
                                         "shots": shots, "keyframes": keyframes})

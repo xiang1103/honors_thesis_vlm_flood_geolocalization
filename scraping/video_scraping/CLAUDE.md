@@ -276,7 +276,8 @@ eye before anything touches the scraped data. Downloader:
 `scraping/video_scraping/youtube_download.py` (`with downloaded(url) as v:`;
 720p video-only H.264, temp dir deleted on exit, duration cap; needs `yt-dlp`
 and `deno` in the conda env -- Node 18 is too old for yt-dlp's YouTube JS
-challenge). Outputs (results.json, index.html, small keyframes) go to
+challenge). Script: `experiments/scene_split/compare_shot_detectors.py`. Outputs
+(results.json, index.html, small keyframes) go to
 `scrape_data/experiments/scene_split/<video_id>/`, gitignored; the video file
 is never kept.
 
@@ -310,6 +311,56 @@ at 89.84 s (score 50.4). Measured alternatives: 27/suppress 21 shots
 in the subway clip). Lesson: never lower the threshold with the merge filter;
 if more sensitivity is wanted later, pair it with `filter_mode=suppress` and
 let scene grouping re-merge the pieces.
+
+Run 2, **TransNetV2 added** (2026-10-14; PyTorch port `transnetv2-pytorch`,
+original weights, CPU, 25 s for the 191 s video vs ~6 s for PySceneDetect).
+The script is now `experiments/scene_split/compare_shot_detectors.py`
+(methods: content, adaptive, transnetv2). TransNetV2: 17 shots; agrees with
+content and adaptive on 13 cuts. It alone found **71.5 s: Metro-North train
+clip -> NWS rainfall-risk map** (content and adaptive both kept 48.8-83.8 s as
+one shot, i.e. a non-flood graphic glued to flood footage -- the worst kind
+of miss, since no later step can split it). It missed **30.6 s** (jet-ski
+underpass -> a different flooded road), which content found, and 179.0 s
+(press conference -> end card, harmless). No frames were labelled "in
+transition" (no gaps between its shots). Adaptive's extra cuts at 34.0 /
+37.0 / 46.0 s are unconfirmed (check by watching). Candidate rule from this
+one video: **union of content + transnetv2 cuts, then drop shots < ~1 s**;
+extra cuts are cheap (scene grouping re-merges), missed cuts are not.
+
+**Owner's decision after run 2: adaptive removed**; the experiment now runs
+content (threshold 27) and transnetv2 only.
+
+Run 3, **OmniShotCut v1.5 added** (2026-10-14; `uva-cv-lab/OmniShotCut_v1.5`,
+MIT, installed with `pip install --no-deps` from GitHub because its
+requirements.txt pins transformers==4.57.3 -- the env keeps 5.6.1; runs on
+the freest GPU via `verify_video_frames.pick_free_gpu`, ~28 s incl. first
+download). Newer alternatives considered: AutoShot (CVPRW 2023, weights only
+on Baidu / a Drive mirror) and PERSIST (Aug 2026 preprint, targets false cuts
+from flashes / text overlays, mmaction2-based) -- not added.
+On `xtBb2eU9d2k` OmniShotCut found 18 shots and agrees with both others on
+13 cuts, and is the only one that LABELS transitions (gaps at 30.9-31.3,
+84.0-84.4, 125.5-125.9 s and around the end card). But it **missed 48.8 s
+(road -> train) and 71.5 s (train -> weather map)**, leaving one 31.3-84.0 s
+shot spanning three places -- worse than content + transnetv2 here. Possible
+cause (unconfirmed): this video is vertical clips on blurred backgrounds and
+OmniShotCut works at ~128x96, so a cut in the centre strip changes little of
+the frame. Not yet tried: its "default" mode (all ranges with transition
+labels) and a full-frame video.
+
+Run 4, second video **`i-U6LeACMnk`** ("Flooding A Concern On Long Island",
+CBS2 TV news, 112 s, full-frame, 24 fps, snowy scenes, several dissolves):
+content 14 shots, transnetv2 25, omnishotcut 17. Judged from the shots on
+either side of each cut (one keyframe per shot, so not frame-exact): **all 24
+transnetv2 cuts look real**; omnishotcut found 16 (it caught the 3 dissolves
+at 22.8 / 31.5 / 58.1 s, labelling them transitions, but missed 8 plain
+cuts); content found 13 (missed the dissolves and cuts between
+similar-coloured snowy scenes). So omnishotcut's misses are NOT explained by
+the vertical-clip format of video 1. **Across both videos: transnetv2 has the
+best recall; content once caught a cut transnetv2 missed (video 1, 30.6 s);
+omnishotcut has not caught any cut both others missed.**
+
+**Owner's decision 2026-10-15: OmniShotCut removed** (code, package, cached
+weights, and its rows in the two result pages, rebuilt from results.json).
 
 Downloader note: YouTube intermittently answers **HTTP 403** on the media
 stream (its PO-token / SABR experiments; yt-dlp has no PO-token provider
