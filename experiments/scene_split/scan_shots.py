@@ -19,6 +19,10 @@ yet"), in a pipeline:
     6. a shot is a flood shot if >= 2 of its 3 frames say yes (1-frame shots:
        that frame decides). A frame the model could not answer counts as no.
     7. append one line per video to the ledger, flushed at once
+    8. save every sampled frame as a small JPEG (FRAME_WIDTH px wide) in
+       <ledger-dir>/frames/<video_id>/shot<k>_<j>.jpg, so the review page
+       (gis_review_server.py, /shots.html) shows exactly what the model saw.
+       Stills, not video; gitignored, never published. --no-frames turns it off.
 
 Ledger: one JSONL file PER WORKER in scrape_data/youtube_shot_scan/
 (shard_<i>of<n>.jsonl) -- /home is NFS, where several processes appending to
@@ -33,9 +37,14 @@ Videos are downloaded and deleted one at a time; no video file is kept
 (owner's rule, 2026-10-14). Run several shards on different GPUs to go
 faster; each loads its own copy of the VLM (~55 GB):
 
-    python3 experiments/scene_split/scan_shots.py --only xtBb2eU9d2k i-U6LeACMnk --save-frames DIR   # test
-    python3 experiments/scene_split/scan_shots.py --shard 0/4 --device-map cuda:0   # one of four workers
-    (start workers on DIFFERENT GPUs: started together, "free" would pick the same one)
+    python3 experiments/scene_split/scan_shots.py --only xtBb2eU9d2k i-U6LeACMnk   # test
+    python3 experiments/scene_split/scan_shots.py --probe      # is YouTube letting us download? (exit 0 / 3)
+    experiments/scene_split/run_scan.sh                        # ROUTINE: one slow worker, waits out bot checks
+
+Speed (owner, 2026-10-15): four workers at ~750 videos/h tripped YouTube's
+"confirm you're not a bot" check after ~1 h. Now ONE worker, a randomised
+--gap between downloads (~180 videos/h); on a bot check the scan exits with
+code 3 (freeing the GPU) and run_scan.sh probes again every few hours.
 """
 from __future__ import annotations
 
@@ -70,14 +79,30 @@ from youtube_download import DownloadError, NeedsCookies, Unavailable, TooLong, 
 FLOOD_FILE = PROJECT / "data" / "youtube_flood_videos.json"
 LEDGER_DIR = PROJECT / "scrape_data" / "youtube_shot_scan"
 
-#: The frame-check question, plus the owner-approved clause (2026-10-15) so a
-#: weather map or a "FLASH FLOOD WARNING" banner is not counted as flooding.
-SHOT_PROMPT = ("Is there any flooding visible in this image? Count only flooding in the scene "
-               "itself, not in text, maps or graphics. Answer with a single word: yes or no.")
+#: Owner's prompt, 2026-10-15 (second version): real flooding seen at STREET
+#: LEVEL -- streets, buildings and surroundings visible -- in a real, not
+#: AI-generated, picture. The first version ("Is there any flooding visible in
+#: this image? Count only flooding in the scene itself, not in text, maps or
+#: graphics. ...") scanned the first 750 videos; each ledger line records its
+#: own prompt, and finished videos are not re-scanned when this changes.
+SHOT_PROMPT = (
+    "Does this image show real flooding seen from street level? Answer yes if water is "
+    "standing or flowing across a street, sidewalk, parking lot, yard or other ground where "
+    "it does not normally stand -- deep or shallow -- and the camera is roughly at the height "
+    "of a person or a vehicle, with some surroundings visible such as the street, buildings, "
+    "vehicles, poles or signs. The picture must be a real photograph or video frame, not "
+    "AI-generated, animated, rendered or from a video game. Phone videos often show blurred "
+    "copies of the picture at the sides; judge the sharp picture in the middle. Answer no "
+    "for maps, charts, graphics, or text and captions about flooding; news anchors, "
+    "interviews or people filling the frame; aerial, drone or high elevated views; indoor "
+    "scenes; close-ups of water with no surroundings; and roads that are only wet from rain. "
+    "Answer with a single word: yes or no.")
 SHORT_SHOT_S = 1.0            # below this, one middle frame
 SAMPLE_AT = (0.1, 0.5, 0.9)   # fractions of the shot
 PASS_OF_3 = 2                 # flood shot: >= 2 of 3 frames say yes
-MIN_DOWNLOAD_GAP_S = 3.0      # be gentle with YouTube
+DOWNLOAD_GAP_S = 10.0         # mean pause between downloads, randomised 0.5x-1.5x
+FRAME_WIDTH = 320             # saved review frames
+EXIT_BOT_CHECK = 3            # exit code when YouTube asks to confirm we are not a bot
 
 
 def now_iso() -> str:
@@ -155,12 +180,37 @@ def prepare(video_id: str, max_duration: float) -> dict:
     return {"video_id": video_id, "meta": meta, "raw_shots": raw, "detect_s": timing, "shots": shots}
 
 
-def producer(todo: list[str], out: queue.Queue, stop: threading.Event, max_duration: float) -> None:
+def frame_path(frames_dir: Path, video_id: str, shot: int, frame: int) -> Path:
+    """Where frame `frame` (0-based) of shot `shot` (0-based) is saved; the
+    review server builds the same names."""
+    return frames_dir / video_id / f"shot{shot + 1:03d}_{frame}.jpg"
+
+
+def probe(video_id: str) -> int:
+    """0 if YouTube hands out this video's formats, EXIT_BOT_CHECK if it asks
+    for a sign-in, 1 on anything else. Metadata only: nothing is downloaded."""
+    import yt_dlp
+    from youtube_download import _classify, _options
+    import tempfile
+    with tempfile.TemporaryDirectory() as tmp, yt_dlp.YoutubeDL(_options(Path(tmp))) as ydl:
+        try:
+            ydl.extract_info(f"https://www.youtube.com/watch?v={video_id}", download=False)
+        except yt_dlp.utils.DownloadError as exc:
+            err = _classify(exc)
+            print(f"probe {video_id}: {type(err).__name__}: {str(err)[:200]}", flush=True)
+            return EXIT_BOT_CHECK if isinstance(err, NeedsCookies) else 1
+    print(f"probe {video_id}: ok", flush=True)
+    return 0
+
+
+def producer(todo: list[str], out: queue.Queue, stop: threading.Event, max_duration: float,
+             gap_s: float) -> None:
+    import random
     last = 0.0
     for vid in todo:
         if stop.is_set():
             break
-        wait = MIN_DOWNLOAD_GAP_S - (time.monotonic() - last)
+        wait = gap_s * random.uniform(0.5, 1.5) - (time.monotonic() - last)
         if wait > 0:
             time.sleep(wait)
         last = time.monotonic()
@@ -189,9 +239,13 @@ def main() -> int:
     ap.add_argument("--limit", type=int, default=None, help="stop after this many videos")
     ap.add_argument("--ledger-dir", type=Path, default=LEDGER_DIR)
     ap.add_argument("--device-map", default="free", help="'free' = GPU with the most free memory, or cuda:N")
-    ap.add_argument("--save-frames", type=Path, default=None,
-                    help="also write each sampled frame as JPEG here, named by verdict (for inspecting a test)")
+    ap.add_argument("--gap", type=float, default=DOWNLOAD_GAP_S,
+                    help="mean seconds between downloads (randomised 0.5x-1.5x; default %(default)s)")
+    ap.add_argument("--no-frames", action="store_true", help="do not save the sampled frames for review")
+    ap.add_argument("--probe", action="store_true",
+                    help=f"only check whether YouTube allows downloads (exit 0, or {EXIT_BOT_CHECK} on a bot check)")
     args = ap.parse_args()
+    frames_dir = None if args.no_frames else args.ledger_dir / "frames"
 
     shard_i, shard_n = (int(x) for x in args.shard.split("/"))
     done = read_ledger(args.ledger_dir)
@@ -206,6 +260,8 @@ def main() -> int:
     print(f"=== {now_iso()} scan_shots shard {args.shard}: {len(todo)} videos to scan "
           f"({sum(1 for v in candidates if not needs_scan(done.get(v)))} of {len(candidates)} already done)",
           flush=True)
+    if args.probe:
+        return probe(todo[0] if todo else candidates[0])
     if not todo:
         return 0
 
@@ -228,17 +284,19 @@ def main() -> int:
 
     q: queue.Queue = queue.Queue(maxsize=2)
     stop = threading.Event()
-    threading.Thread(target=producer, args=(todo, q, stop, args.max_duration), daemon=True).start()
+    threading.Thread(target=producer, args=(todo, q, stop, args.max_duration, args.gap), daemon=True).start()
 
     args.ledger_dir.mkdir(parents=True, exist_ok=True)
     ledger = args.ledger_dir / f"shard_{shard_i}of{shard_n}{'_only' if args.only else ''}.jsonl"
     n = shots_total = flood_total = 0
+    blocked = False
     t_start = time.monotonic()
     with ledger.open("a", encoding="utf-8") as fh:
         while (item := q.get()) is not None:
             if "fatal" in item:
                 print(f"FATAL {item['video_id']}: {item['fatal']}", flush=True)
                 stop.set()
+                blocked = True
                 break
             row = {"video_id": item["video_id"], "scanned_at": now_iso()}
             if "error" in item:
@@ -248,14 +306,14 @@ def main() -> int:
                 shots_out = []
                 for k, shot in enumerate(item["shots"]):
                     answers = []
-                    for t, image in shot["frames"]:
+                    for j, (t, image) in enumerate(shot["frames"]):
                         answer = parse_answer(vlm._generate(image, SHOT_PROMPT)) if image is not None else None
                         answers.append(answer)
-                        if args.save_frames and image is not None:
-                            d = args.save_frames / item["video_id"]
-                            d.mkdir(parents=True, exist_ok=True)
-                            image.resize((320, round(image.height * 320 / image.width))).save(
-                                d / f"shot{k + 1:03d}_{t:07.2f}s_{answer}.jpg", quality=80)
+                        if frames_dir and image is not None:
+                            path = frame_path(frames_dir, item["video_id"], k, j)
+                            path.parent.mkdir(parents=True, exist_ok=True)
+                            image.resize((FRAME_WIDTH, round(image.height * FRAME_WIDTH / image.width))).save(
+                                path, quality=80)
                     flood = is_flood_shot(answers)
                     shots_out.append({"start": shot["start"], "end": shot["end"],
                                       "frames": [{"t": t, "answer": a} for (t, _), a in zip(shot["frames"], answers)],
@@ -272,8 +330,9 @@ def main() -> int:
                       f"{item['meta']['duration_s']:.0f} s) -- {3600 * rate:.0f} videos/h", flush=True)
             fh.write(json.dumps(row, ensure_ascii=False) + "\n")
             fh.flush()
-    print(f"=== done: {n} videos, {shots_total} shots, {flood_total} flood shots", flush=True)
-    return 0
+    print(f"=== {'stopped by bot check' if blocked else 'done'}: {n} videos, {shots_total} shots, "
+          f"{flood_total} flood shots", flush=True)
+    return EXIT_BOT_CHECK if blocked else 0
 
 
 if __name__ == "__main__":

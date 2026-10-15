@@ -420,6 +420,47 @@ s per video and a machine load of ~550 on 344 cores; both shot models now
 run on the worker's GPU (3 s each, identical cuts) and each worker is capped
 at 4 CPU threads. ~700 videos/h total after the fix.
 
+**YouTube bot check, 2026-10-15: now ONE slow worker (owner's decision).**
+After ~1 h at ~750 videos/h (4 workers), YouTube answered every download with
+"Sign in to confirm you're not a bot" and all four workers stopped themselves
+(750 videos done, no failures: 7,543 shots, 4,314 flood; 698 videos with a
+flood shot; 9.3 of 14.0 h of footage in flood shots). The scan now runs
+through `experiments/scene_split/run_scan.sh`: one worker, a randomised
+`--gap` (mean 10 s) between downloads (~180 videos/h); on a bot check
+`scan_shots.py` exits 3 and frees its GPU, and the loop probes once every
+2 h (`--probe`: metadata only, no download, no model) and restarts when
+YouTube allows downloads again. Log: `scrape_data/logs/shot-scan.log`; a lock
+stops a second loop. Cookies from a signed-in account were NOT used (owner
+did not choose that; it risks the account).
+
+**Shot prompt v2 (owner, 2026-10-15), used from the 751st video on:** real
+flooding seen from STREET LEVEL, surroundings visible, real (not
+AI-generated / animated / rendered / game); no for maps, graphics, captions,
+anchors, interviews, people filling the frame, aerial/drone, indoor, water
+close-ups, roads only wet from rain; plus a note that phone videos have
+blurred side copies (judge the sharp middle). Text: `SHOT_PROMPT` in
+`scan_shots.py`. On the 2 test videos' 139 saved frames: flood shots 25 -> 19
+of 51. Correctly dropped: drain / boots / shovel close-ups, subway stairs and
+station, bus interior. A first, stricter draft ("ALL of the following",
+"wet roads or small puddles") dropped to 10, rejecting cars driving through
+flooded Long Island streets and the kayak in a flooded underpass (the blurred
+side bars of vertical video probably read as "not real") -- hence the
+softer wording. Left: snowmelt-wet streets are split, one boots-in-slush
+frame passes. The first 750 videos keep their v1 answers (each line records
+its prompt).
+
+**Review page, 2026-10-15:** `gis_review_server.py` :8768 `/shots.html` -- one
+card per scanned video with its shots on a timeline (flood / not flood /
+gap); the viewer lists every shot with the frames the model judged and its
+answers, plays any shot's range in the embed, and takes per-shot decisions
+(Flood / Not flood / Unsure, browser localStorage, exportable) to calibrate
+the shot rule. It re-reads the ledger when it changes. For it, the scan now
+SAVES every sampled frame (320 px JPEG) in
+`scrape_data/youtube_shot_scan/frames/<video_id>/shot<k>_<j>.jpg` --
+stills, not video; gitignored, never published; `--no-frames` turns it off.
+The first 750 videos were scanned before this and have no frames (the page
+shows timestamps there and the shot still plays).
+
 **Owner's decision 2026-10-15: PySceneDetect removed entirely** (its content
 detector was the last one kept). The experiment now runs transnetv2 and
 autoshot, plus their derived union; `scenedetect` uninstalled from the env;

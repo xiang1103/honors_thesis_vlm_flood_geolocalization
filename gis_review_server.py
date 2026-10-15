@@ -19,6 +19,13 @@ A second page, /videos.html, browses the YouTube flood videos
 ``scraping/video_scraping/youtube_scrape.py``): cover thumbnail, title, tags,
 description, labels, and the embedded player in the detail view. Videos are
 never downloaded either; the browser loads YouTube's thumbnails and player.
+
+A third page, /shots.html, shows the per-shot flood scan
+(``experiments/scene_split/scan_shots.py``): every scanned video, its shots on
+a timeline, the frames the model judged with its answers, and the player
+cued to any shot. It re-reads the scan's ledger (``scrape_data/youtube_shot_scan/``)
+whenever that changes, so a reload shows videos scanned since the server
+started. The frames are the scan's own small JPEGs, served from that folder.
 """
 
 from __future__ import annotations
@@ -28,6 +35,7 @@ import errno
 import hashlib
 import json
 import re
+import threading
 from collections import Counter
 from datetime import datetime, timezone
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
@@ -38,6 +46,7 @@ from urllib.parse import quote, unquote, urlparse
 PROJECT_DIR = Path(__file__).resolve().parent
 DEFAULT_RESULTS = PROJECT_DIR / "data" / "gis_flood_images.json"
 DEFAULT_VIDEOS = PROJECT_DIR / "data" / "youtube_videos.json"
+DEFAULT_SHOTS = PROJECT_DIR / "scrape_data" / "youtube_shot_scan"
 STATIC_DIR = PROJECT_DIR / "gis_review_web"
 #: The news site's stylesheet, served as-is so the two sites cannot drift apart
 #: visually. GIS-only rules live in gis_review_web/gis.css.
@@ -282,9 +291,113 @@ def load_video_catalog(videos_file: Path) -> dict:
     }
 
 
-def make_handler(catalog: dict, video_catalog: dict):
+VIDEO_ID_RE = re.compile(r"^[A-Za-z0-9_-]{11}$")
+#: scan_shots.frame_path(): <video_id>/shot<k, 3 digits, from 1>_<j, from 0>.jpg
+FRAME_NAME_RE = re.compile(r"^shot\d{3}_\d\.jpg$")
+
+
+def read_shot_ledger(folder: Path) -> list[dict]:
+    """Finished scan lines, the latest per video (scan_shots.read_ledger's
+    rule, minus the error rows, which have no shots to show)."""
+    done: dict[str, dict] = {}
+    for path in sorted(folder.glob("*.jsonl")):
+        for line in path.read_text(encoding="utf-8").splitlines():
+            try:
+                row = json.loads(line)
+            except json.JSONDecodeError:
+                continue                                  # a killed run's last line
+            if "error" in row or not isinstance(row.get("shots"), list):
+                continue
+            prev = done.get(row["video_id"])
+            if prev is None or row.get("scanned_at", "") >= prev.get("scanned_at", ""):
+                done[row["video_id"]] = row
+    return list(done.values())
+
+
+def load_shot_catalog(shots_dir: Path, videos_by_id: dict[str, dict]) -> dict:
+    """The shot page's data: one item per scanned video, its shots with their
+    frames' answers, joined to the video's catalog row for title, labels and
+    the player. Frame URLs are not listed -- the page builds them from
+    `has_frames` and the shot / frame index (see FRAME_NAME_RE)."""
+    frames_dir = shots_dir / "frames"
+    items = []
+    for row in read_shot_ledger(shots_dir):
+        vid = str(row["video_id"])
+        video = videos_by_id.get(vid, {})
+        shots = [{"start": s["start"], "end": s["end"], "flood": bool(s.get("flood")),
+                  "answers": [f.get("answer") for f in s.get("frames") or []],
+                  "times": [f.get("t") for f in s.get("frames") or []]}
+                 for s in row["shots"]]
+        # YouTube's duration is whole seconds; the decoded video can run a
+        # fraction longer, so the last shot's end is the better length.
+        duration = max(float(row.get("duration_s") or 0), max((s["end"] for s in shots), default=0))
+        flood_s = sum(s["end"] - s["start"] for s in shots if s["flood"])
+        items.append({
+            "video_id": vid,
+            "title": str(row.get("title") or video.get("title") or "Untitled"),
+            "duration_s": duration,
+            "width": row.get("width"),
+            "height": row.get("height"),
+            "fps": row.get("fps"),
+            "scanned_at": str(row.get("scanned_at") or ""),
+            "published": video.get("published", ""),
+            "tags": video.get("tags", []),
+            "flood_text_score": video.get("flood_text_score"),
+            "location": video.get("location", "unknown"),
+            "source_url": f"https://www.youtube.com/watch?v={vid}",
+            "embed_url": f"{VIDEO_EMBED_ORIGIN}/embed/{vid}",
+            "cover_url": f"https://i.ytimg.com/vi/{vid}/hqdefault.jpg",
+            "has_frames": (frames_dir / vid).is_dir(),
+            "raw_shot_counts": {k: len(v) for k, v in (row.get("raw_shots") or {}).items()},
+            "shots": shots,
+            "n_shots": len(shots),
+            "n_flood": sum(s["flood"] for s in shots),
+            "flood_s": round(flood_s, 2),
+            "flood_share": round(flood_s / duration, 4) if duration else 0.0,
+        })
+    items.sort(key=lambda i: i["scanned_at"], reverse=True)
+    return {
+        "available": bool(items),
+        "source_dir": str(shots_dir),
+        "summary": {
+            "videos": len(items),
+            "shots": sum(i["n_shots"] for i in items),
+            "flood_shots": sum(i["n_flood"] for i in items),
+            "videos_with_flood": sum(1 for i in items if i["n_flood"]),
+            "hours": round(sum(i["duration_s"] for i in items) / 3600, 2),
+            "flood_hours": round(sum(i["flood_s"] for i in items) / 3600, 2),
+            "with_frames": sum(i["has_frames"] for i in items),
+        },
+        "items": items,
+    }
+
+
+class ShotCatalog:
+    """Rebuilt only when the ledger files change, so a page reload during a
+    running scan shows the new videos without re-reading on every request."""
+
+    def __init__(self, shots_dir: Path, video_catalog: dict):
+        self.shots_dir = shots_dir
+        self.videos_by_id = {i["video_id"]: i for i in video_catalog["items"]}
+        self._key = None
+        self._payload = b""
+        self._lock = threading.Lock()
+
+    def payload(self) -> bytes:
+        key = tuple((p.name, p.stat().st_mtime_ns, p.stat().st_size)
+                    for p in sorted(self.shots_dir.glob("*.jsonl")))
+        with self._lock:
+            if key != self._key:
+                catalog = load_shot_catalog(self.shots_dir, self.videos_by_id)
+                self._payload = json.dumps(catalog, ensure_ascii=False).encode("utf-8")
+                self._key = key
+            return self._payload
+
+
+def make_handler(catalog: dict, video_catalog: dict, shot_catalog: ShotCatalog):
     payload = json.dumps(catalog, ensure_ascii=False).encode("utf-8")
     video_payload = json.dumps(video_catalog, ensure_ascii=False).encode("utf-8")
+    frames_dir = shot_catalog.shots_dir / "frames"
 
     class ReviewHandler(SimpleHTTPRequestHandler):
         def __init__(self, *args, **kwargs):
@@ -297,6 +410,18 @@ def make_handler(catalog: dict, video_catalog: dict):
                 return
             if path == "/api/videos":
                 self._send(video_payload, "application/json; charset=utf-8")
+                return
+            if path == "/api/shots":
+                self._send(shot_catalog.payload(), "application/json; charset=utf-8")
+                return
+            if path.startswith("/frames/"):
+                parts = path.split("/")
+                # Only <11-char id>/<frame name>: nothing else in the folder is served.
+                if (len(parts) == 4 and VIDEO_ID_RE.match(parts[2]) and FRAME_NAME_RE.match(parts[3])
+                        and (frames_dir / parts[2] / parts[3]).is_file()):
+                    self._send((frames_dir / parts[2] / parts[3]).read_bytes(), "image/jpeg")
+                else:
+                    self.send_error(404)
                 return
             if path == "/shared/styles.css":
                 self._send(SHARED_STYLES.read_bytes(), "text/css; charset=utf-8")
@@ -318,7 +443,7 @@ def make_handler(catalog: dict, video_catalog: dict):
             self.send_header("Referrer-Policy", "no-referrer")
             self.send_header(
                 "Content-Security-Policy",
-                "default-src 'self'; img-src https: data:; "
+                "default-src 'self'; img-src 'self' https: data:; "
                 "style-src 'self'; script-src 'self'; connect-src 'self'; "
                 f"frame-src {VIDEO_EMBED_ORIGIN}",
             )
@@ -334,6 +459,8 @@ def main() -> None:
     parser.add_argument("--results", type=Path, default=DEFAULT_RESULTS)
     parser.add_argument("--videos", type=Path, default=DEFAULT_VIDEOS,
                         help="YouTube videos for /videos.html (optional; default %(default)s)")
+    parser.add_argument("--shots", type=Path, default=DEFAULT_SHOTS,
+                        help="shot-scan ledger folder for /shots.html (optional; default %(default)s)")
     args = parser.parse_args()
 
     if not args.results.is_file():
@@ -347,9 +474,10 @@ def main() -> None:
 
     catalog = load_catalog(args.results)
     video_catalog = load_video_catalog(args.videos)
+    shot_catalog = ShotCatalog(args.shots, video_catalog)
     summary = catalog["summary"]
     try:
-        server = ThreadingHTTPServer((args.host, args.port), make_handler(catalog, video_catalog))
+        server = ThreadingHTTPServer((args.host, args.port), make_handler(catalog, video_catalog, shot_catalog))
     except OSError as exc:
         if exc.errno == errno.EADDRINUSE:
             parser.error(
@@ -369,6 +497,7 @@ def main() -> None:
               f"http://{args.host}:{args.port}/videos.html", flush=True)
     else:
         print(f"Video review: no {args.videos} yet; /videos.html will say so.", flush=True)
+    print(f"Shot scan review: http://{args.host}:{args.port}/shots.html (reads {args.shots})", flush=True)
     print("Press Ctrl+C to stop.", flush=True)
     try:
         server.serve_forever()

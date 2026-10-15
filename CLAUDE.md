@@ -312,6 +312,7 @@ local_vlm/        model mechanics      backend.py, download_model.py
 image_review_web/  + image_review_server.py   news review site (human + model)  :8765
 gis_review_web/    + gis_review_server.py     GIS/MyCoast review site           :8768
                                                + /videos.html: YouTube videos (videos.js)
+                                               + /shots.html: per-shot flood scan (shots.js)
 make_metadata.py  writes data/meta_data.json (news dataset snapshot)
 make_mycoast_metadata.py  writes data/mycoast_meta_data.json (MyCoast snapshot)
 make_youtube_metadata.py  writes data/youtube_videos_meta_data.json (called by youtube_scrape.py)
