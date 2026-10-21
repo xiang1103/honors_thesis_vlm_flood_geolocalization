@@ -1,69 +1,69 @@
 {
-  "generated_at": "2026-10-15T17:53:02+00:00",
+  "generated_at": "2026-10-20T07:32:33+00:00",
   "source_file": "data/youtube_flood_videos.json",
   "note": "One row per YouTube video; no video bytes are stored, only metadata and i.ytimg.com thumbnails. flood_text_score is the text signal only (the video is ABOUT a flood); flood_visual is the VLM over thumbnails (flooding is VISIBLE). in_ny / in_nyc are null when unknown, which is not the same as false.",
   "all": {
-    "videos": 4611,
-    "thumbnails": 18413,
-    "hours": 356.6,
+    "videos": 5228,
+    "thumbnails": 20879,
+    "hours": 407.7,
     "earliest": "2006-08-25",
-    "latest": "2026-10-14"
+    "latest": "2026-10-18"
   },
   "available": {
-    "videos": 4611,
-    "thumbnails": 18413,
-    "hours": 356.6,
+    "videos": 5228,
+    "thumbnails": 20879,
+    "hours": 407.7,
     "earliest": "2006-08-25",
-    "latest": "2026-10-14"
+    "latest": "2026-10-18"
   },
   "flood_text_score": {
-    "0.2-0.4": 253,
-    "0.4-0.6": 1518,
-    "0.6-0.8": 1629,
-    "0.8-1.0": 1211
+    "0.2-0.4": 304,
+    "0.4-0.6": 1727,
+    "0.6-0.8": 1825,
+    "0.8-1.0": 1372
   },
-  "flood_text_relevant": 4611,
+  "flood_text_relevant": 5228,
   "flood_text_threshold": 0.3,
   "flood_visual": {
-    "classified": 4611,
-    "flood_visible": 4611,
+    "classified": 5228,
+    "flood_visible": 5228,
     "no_flood_visible": 0,
     "undecidable": 0
   },
   "ai_by_text": 0,
   "in_ny": {
-    "true": 3371,
-    "false": 783,
-    "unknown": 457
+    "true": 3773,
+    "false": 936,
+    "unknown": 519
   },
   "in_nyc": {
-    "true": 1932,
-    "false": 1697,
-    "unknown": 982
+    "true": 2181,
+    "false": 1921,
+    "unknown": 1126
   },
-  "with_coordinates": 959,
+  "with_coordinates": 1118,
   "thumbnails_without_digest": 0,
   "by_year": {
     "2006": 1,
     "2007": 8,
-    "2008": 8,
+    "2008": 10,
     "2009": 5,
-    "2010": 25,
-    "2011": 355,
-    "2012": 187,
-    "2013": 40,
-    "2014": 88,
-    "2015": 66,
-    "2016": 38,
-    "2017": 136,
-    "2018": 90,
-    "2019": 124,
-    "2020": 74,
-    "2021": 453,
-    "2022": 173,
-    "2023": 831,
-    "2024": 292,
-    "2025": 547,
-    "2026": 1070
+    "2010": 27,
+    "2011": 396,
+    "2012": 202,
+    "2013": 44,
+    "2014": 95,
+    "2015": 73,
+    "2016": 39,
+    "2017": 147,
+    "2018": 96,
+    "2019": 131,
+    "2020": 80,
+    "2021": 494,
+    "2022": 191,
+    "2023": 947,
+    "2024": 321,
+    "2025": 624,
+    "2026": 1297
   }
 }

@@ -309,6 +309,8 @@ verification/     judging only         verify_text.py, verify_images_vlm.py, ded
                   country pass         locate_articles.py, country_codes.py, make_iso_table.py,
                                        compile_countries.py
 local_vlm/        model mechanics      backend.py, download_model.py
+experiments/      scene_split/ (shot detection + per-shot flood scan),
+                  flood_depth/ (water-depth benchmark, PLAN.md)
 image_review_web/  + image_review_server.py   news review site (human + model)  :8765
 gis_review_web/    + gis_review_server.py     GIS/MyCoast review site           :8768
                                                + /videos.html: YouTube videos (videos.js)
@@ -773,3 +775,8 @@ Priority is MyCoast and MyCoast-like sources (owner's direction, 2026-09-28).
 7. Build a small hand-labelled ground-truth set (:8765 / :8768 export
    decisions) so model and prompt changes can be measured instead of guessed.
    MyCoast's coordinates make it the natural geolocalization evaluation set.
+8. Flood WATER DEPTH benchmark (started 2026-10-19): `experiments/flood_depth/`,
+   plan and decisions in `experiments/flood_depth/PLAN.md` -- read it first.
+   Items are flood shots from the shot scan; the VLM is asked an ordinal
+   depth level (L0-L5, X) under input conditions C1-C5. Human labels and the
+   labelling page do not exist yet. Outputs in `scrape_data/experiments/flood_depth/`.
