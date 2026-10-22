@@ -208,8 +208,9 @@ No item file: items are rebuilt from the scan ledger (ids name the frames);
 C3's text is read from `data/youtube_videos.json` in memory. Pilot answers
 and boxes with matching ids are reused. `evaluate.py --full --full-dir
 scrape_data/experiments/flood_depth/full_5cm` scores it (the default
-`--full-dir` is the L0–L5 run). Human labels are L0–L5, so scoring cm answers
-against them needs numeric labels or a cm→level mapping (not built).
+`--full-dir` is the L0–L5 run). **Owner, 2026-10-21: answers stay in cm;
+human labels are not a concern for now** -- no cm→level mapping, no labelling
+work planned.
 Speed: ~3,400 questions/h per GPU, 7 questions per shot → ~7 h on 3 GPUs.
 
 ## Commands
@@ -222,7 +223,16 @@ python3 experiments/flood_depth/detect_refs.py                  # C5 boxes, ~0.5
 python3 experiments/flood_depth/run_conditions.py               # C1-C5, freest GPU with 60 GiB
 python3 experiments/flood_depth/run_conditions.py --conditions C2 --limit 20
 python3 experiments/flood_depth/evaluate.py                     # -> results.json
+python3 gis_review_server.py                                    # browse a full run: :8768/depth.html
+python3 gis_review_server.py --depth scrape_data/experiments/flood_depth/full   # the L0-L5 run instead
 ```
+
+`/depth.html` (data from `depth_review.py`) shows, per video, every shot's
+three frames, each condition's answer and the exact prompt it was given:
+the fixed text, the uploader block (C3), the height table (C4/C5) and the C5
+frame with the detector's numbered boxes. Read-only. One card per video with
+its shots inside; the server filters, sorts and pages (10 videos a page), so
+the browser never downloads the whole run.
 
 ## Next steps, in order
 

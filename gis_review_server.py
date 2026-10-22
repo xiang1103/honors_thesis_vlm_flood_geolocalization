@@ -26,6 +26,13 @@ a timeline, the frames the model judged with its answers, and the player
 cued to any shot. It re-reads the scan's ledger (``scrape_data/youtube_shot_scan/``)
 whenever that changes, so a reload shows videos scanned since the server
 started. The frames are the scan's own small JPEGs, served from that folder.
+
+A fourth page, /depth.html, shows the flood water-depth benchmark
+(``experiments/flood_depth/``, a run_all.py output folder, default
+``scrape_data/experiments/flood_depth/full_5cm``): every video's shots with
+the answer of each input condition C1-C5, the exact prompt each condition was
+given (uploader text, height table), and the detector boxes drawn on the
+frame the way C5 saw them. Rebuilt when the run's files change.
 """
 
 from __future__ import annotations
@@ -40,13 +47,15 @@ from collections import Counter
 from datetime import datetime, timezone
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
-from urllib.parse import quote, unquote, urlparse
+from urllib.parse import parse_qs, quote, unquote, urlparse
 
 
 PROJECT_DIR = Path(__file__).resolve().parent
 DEFAULT_RESULTS = PROJECT_DIR / "data" / "gis_flood_images.json"
 DEFAULT_VIDEOS = PROJECT_DIR / "data" / "youtube_videos.json"
 DEFAULT_SHOTS = PROJECT_DIR / "scrape_data" / "youtube_shot_scan"
+DEFAULT_DEPTH = PROJECT_DIR / "scrape_data" / "experiments" / "flood_depth" / "full_5cm"
+DEPTH_CODE = PROJECT_DIR / "experiments" / "flood_depth"
 STATIC_DIR = PROJECT_DIR / "gis_review_web"
 #: The news site's stylesheet, served as-is so the two sites cannot drift apart
 #: visually. GIS-only rules live in gis_review_web/gis.css.
@@ -400,7 +409,45 @@ class ShotCatalog:
             return self._payload
 
 
-def make_handler(catalog: dict, video_catalog: dict, shot_catalog: ShotCatalog):
+class DepthCatalog:
+    """The depth page's data, rebuilt only when the run's files change (a
+    run still in progress rewrites video_labels.json as shards finish).
+    The page fetches the run's fixed parts once (meta) and then ONE page of
+    videos at a time -- the whole run is ~5 MB, a page ~40 KB."""
+
+    def __init__(self, run_dir: Path):
+        import sys
+        sys.path.insert(0, str(DEPTH_CODE))
+        import depth_review
+        self.run_dir = run_dir
+        self._review = depth_review
+        self._key = None
+        self._catalog: dict = {}
+        self._lock = threading.Lock()
+        # build in the background so the first page view does not wait for it
+        threading.Thread(target=self.catalog, daemon=True).start()
+
+    def catalog(self) -> dict:
+        key = tuple((p.name, p.stat().st_mtime_ns, p.stat().st_size)
+                    for p in self._review.watched_files(self.run_dir) if p.exists())
+        with self._lock:
+            if key != self._key:
+                self._catalog = self._review.load_depth_catalog(self.run_dir)
+                self._key = key
+            return self._catalog
+
+    def meta(self) -> bytes:
+        catalog = self.catalog()
+        body = self._review.meta(catalog) if catalog["available"] else catalog
+        return json.dumps(body, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
+
+    def page(self, query: str) -> bytes:
+        params = {k: v[-1] for k, v in parse_qs(query).items()}
+        body = self._review.query(self.catalog(), params)
+        return json.dumps(body, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
+
+
+def make_handler(catalog: dict, video_catalog: dict, shot_catalog: ShotCatalog, depth_catalog: DepthCatalog):
     payload = json.dumps(catalog, ensure_ascii=False).encode("utf-8")
     video_payload = json.dumps(video_catalog, ensure_ascii=False).encode("utf-8")
     frames_dir = shot_catalog.shots_dir / "frames"
@@ -419,6 +466,12 @@ def make_handler(catalog: dict, video_catalog: dict, shot_catalog: ShotCatalog):
                 return
             if path == "/api/shots":
                 self._send(shot_catalog.payload(), "application/json; charset=utf-8")
+                return
+            if path == "/api/depth/meta":
+                self._send(depth_catalog.meta(), "application/json; charset=utf-8")
+                return
+            if path == "/api/depth":
+                self._send(depth_catalog.page(urlparse(self.path).query), "application/json; charset=utf-8")
                 return
             if path.startswith("/frames/"):
                 parts = path.split("/")
@@ -467,6 +520,8 @@ def main() -> None:
                         help="YouTube videos for /videos.html (optional; default %(default)s)")
     parser.add_argument("--shots", type=Path, default=DEFAULT_SHOTS,
                         help="shot-scan ledger folder for /shots.html (optional; default %(default)s)")
+    parser.add_argument("--depth", type=Path, default=DEFAULT_DEPTH,
+                        help="flood-depth run folder for /depth.html (optional; default %(default)s)")
     args = parser.parse_args()
 
     if not args.results.is_file():
@@ -483,7 +538,8 @@ def main() -> None:
     shot_catalog = ShotCatalog(args.shots, video_catalog)
     summary = catalog["summary"]
     try:
-        server = ThreadingHTTPServer((args.host, args.port), make_handler(catalog, video_catalog, shot_catalog))
+        server = ThreadingHTTPServer((args.host, args.port), make_handler(catalog, video_catalog, shot_catalog,
+                                                                      DepthCatalog(args.depth)))
     except OSError as exc:
         if exc.errno == errno.EADDRINUSE:
             parser.error(
@@ -504,6 +560,7 @@ def main() -> None:
     else:
         print(f"Video review: no {args.videos} yet; /videos.html will say so.", flush=True)
     print(f"Shot scan review: http://{args.host}:{args.port}/shots.html (reads {args.shots})", flush=True)
+    print(f"Depth benchmark review: http://{args.host}:{args.port}/depth.html (reads {args.depth})", flush=True)
     print("Press Ctrl+C to stop.", flush=True)
     try:
         server.serve_forever()

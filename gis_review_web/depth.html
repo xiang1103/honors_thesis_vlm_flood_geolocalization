@@ -1,0 +1,142 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="description" content="Local review interface for the flood water-depth benchmark (conditions C1-C5)">
+    <meta name="color-scheme" content="dark">
+    <title>Flood depth review</title>
+    <link rel="stylesheet" href="/shared/styles.css">
+    <link rel="stylesheet" href="gis.css">
+  </head>
+  <body>
+    <header class="site-header">
+      <nav class="site-nav" aria-label="Dataset pages">
+        <a href="/">Photos</a>
+        <a href="/videos.html">Videos</a>
+        <a href="/shots.html">Shots</a>
+        <a href="/depth.html" aria-current="page">Depth</a>
+      </nav>
+      <div class="header-copy">
+        <p class="eyebrow">VLM flooding dataset · water-depth benchmark · conditions C1–C5</p>
+        <h1>Depth review</h1>
+        <p id="summary" class="lede" aria-live="polite">Loading run…</p>
+        <p id="promptWarning" class="storage-notice storage-notice-warn" hidden></p>
+      </div>
+    </header>
+
+    <main>
+      <section class="control-panel" aria-label="Depth filters">
+        <div class="secondary-filters depth-filters">
+          <label>
+            <span>Condition</span>
+            <select id="condition">
+              <option value="C1">C1 · one frame</option>
+              <option value="C2">C2 · three frames</option>
+              <option value="C3">C3 · + uploader text</option>
+              <option value="C4">C4 · + height table</option>
+              <option value="C5" selected>C5 · + detector boxes</option>
+            </select>
+          </label>
+          <label>
+            <span>Show</span>
+            <select id="filter">
+              <option value="all">All videos</option>
+              <option value="boxes">Detector found objects</option>
+              <option value="noboxes">Detector found nothing</option>
+              <option value="x">Condition answered X somewhere</option>
+              <option value="spread">Conditions disagree (&gt; 30 cm)</option>
+            </select>
+          </label>
+          <label>
+            <span>Location</span>
+            <select id="location">
+              <option value="all">Anywhere</option>
+              <option value="nyc">NYC (5 boroughs)</option>
+              <option value="ny">NY State outside NYC</option>
+              <option value="outside">Outside New York</option>
+              <option value="unknown">Location unknown</option>
+            </select>
+          </label>
+          <label>
+            <span>Sort</span>
+            <select id="sortOrder">
+              <option value="deep">Deepest first (chosen condition)</option>
+              <option value="shallow">Shallowest first (chosen condition)</option>
+              <option value="spread">Most disagreement between conditions</option>
+              <option value="shots">Most shots</option>
+              <option value="newest">Newest upload</option>
+            </select>
+          </label>
+          <label>
+            <span>Search</span>
+            <input id="search" type="search" placeholder="title, tags, video id" autocomplete="off">
+          </label>
+          <label class="check-label">
+            <input id="showBoxes" type="checkbox" checked>
+            <span>Draw detector boxes</span>
+          </label>
+        </div>
+      </section>
+
+      <section class="results-heading" aria-live="polite">
+        <div>
+          <p id="resultCount">Loading videos…</p>
+          <p class="browser-note">One card per video, with each of its flood shots: the shot's key frame
+            (the frame C1, C3, C4 and C5 were shown) and every condition's answer. C1 also lists the other two
+            frames' answers. The highlighted row is the condition chosen above, which sorts the list.
+            Click a shot to play it and see the exact prompt each condition was given.</p>
+        </div>
+        <span id="pageStatus"></span>
+      </section>
+
+      <section id="videoGrid" class="depth-grid" aria-label="Videos"></section>
+      <section id="emptyState" class="empty-state" hidden>
+        <h2>No videos match these filters</h2>
+        <p>Try another filter or search.</p>
+      </section>
+
+      <nav class="pagination" aria-label="Results pages">
+        <button id="previousPage" type="button">← Previous</button>
+        <label class="page-jump">Page <input id="pageJump" type="number" min="1" value="1"> <span id="paginationStatus"></span></label>
+        <button id="nextPage" type="button">Next →</button>
+      </nav>
+    </main>
+
+    <dialog id="viewer" class="viewer shot-viewer depth-viewer">
+      <button id="closeViewer" class="close-button" type="button" aria-label="Close viewer">×</button>
+      <div class="viewer-layout">
+        <div class="viewer-media shot-media">
+          <div class="shot-player">
+            <div class="player-frame">
+              <iframe id="player" title="YouTube video player"
+                      allow="accelerometer; autoplay; encrypted-media; gyroscope; picture-in-picture; fullscreen"></iframe>
+            </div>
+          </div>
+          <p class="shot-toolbar"><span id="shotCount"></span></p>
+          <div id="shotList" class="depth-shot-list"></div>
+        </div>
+        <article class="viewer-details">
+          <h2 id="viewerTitle"></h2>
+          <div class="viewer-links">
+            <a id="viewerSourceLink" target="_blank" rel="noopener noreferrer">Watch on YouTube ↗</a>
+          </div>
+          <h3 class="depth-subhead">Video label per condition</h3>
+          <table id="labelTable" class="depth-table"></table>
+
+          <h3 class="depth-subhead">Prompt sent · <span id="promptTitle"></span></h3>
+          <div id="promptTabs" class="prompt-tabs" role="tablist"></div>
+          <div id="promptBody" class="prompt-body"></div>
+
+          <div class="viewer-navigation">
+            <button id="previousVideo" type="button" aria-label="Previous matching video">←</button>
+            <span id="viewerPosition"></span>
+            <button id="nextVideo" type="button" aria-label="Next matching video">→</button>
+          </div>
+        </article>
+      </div>
+    </dialog>
+
+    <script src="depth.js"></script>
+  </body>
+</html>

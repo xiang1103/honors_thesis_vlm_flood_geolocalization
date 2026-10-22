@@ -191,3 +191,92 @@ button.tl-shot:hover { filter: brightness(1.25); }
 }
 @media (max-width: 800px) { .shot-filters { grid-template-columns: 1fr 1fr; } }
 @media (max-width: 560px) { .shot-filters { grid-template-columns: 1fr; } }
+
+/* -- depth page ------------------------------------------------------------ */
+
+.depth-filters { grid-template-columns: repeat(4, minmax(150px, 1fr)) minmax(180px, 1.4fr) auto; align-items: end; }
+.check-label { display: flex; align-items: center; gap: 8px; min-height: 40px; color: var(--muted); }
+.check-label input { width: auto; }
+.muted { color: var(--muted); }
+
+.depth-cover { position: relative; display: grid; place-items: center; width: 100%; height: 220px; padding: 0; border: 0; background: #000; cursor: pointer; --frame-h: 220px; }
+/* Width/height come from the image's own ratio (set on load, depth.js), so
+   the image fills the frame exactly and 0-1 box fractions line up. */
+.depth-frame { --frame-h: 100%; position: relative; display: block; width: 100%; aspect-ratio: 16 / 9; margin: 0 auto; overflow: hidden; background: #000; }
+.depth-cover .depth-frame { --frame-h: 220px; }
+.shot-frame .depth-frame { --frame-h: 150px; }
+.prompt-images .depth-frame { --frame-h: 300px; }
+.prompt-images-3 .depth-frame { --frame-h: 150px; }
+.depth-frame img, .video-cover .depth-frame img { width: 100%; height: 100%; object-fit: fill; display: block; }
+.det-box { position: absolute; border: 2px solid; box-sizing: border-box; pointer-events: auto; }
+.det-tag { position: absolute; left: -2px; top: -2px; padding: 0 4px; color: #000; font: 700 0.68rem/1.3 system-ui, sans-serif; }
+
+.depth-grid { display: grid; gap: 16px; }
+.depth-card { padding: 14px 16px; border: 1px solid var(--line); border-radius: 12px; background: var(--panel); }
+.depth-card-head { display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: 8px 16px; }
+.depth-card-head .card-title { margin: 0; font-size: 1.02rem; }
+.depth-video-labels { align-items: center; }
+.depth-labels-title { color: var(--muted); font-size: 0.78rem; }
+.depth-tiles { display: grid; grid-template-columns: repeat(auto-fill, minmax(210px, 1fr)); gap: 10px; margin-top: 10px; }
+.depth-tile { display: grid; align-content: start; gap: 6px; padding: 6px; border: 1px solid var(--line); border-radius: 8px;
+  background: #09131b; color: var(--text); text-align: left; font: inherit; cursor: pointer; }
+.depth-tile:hover, .depth-tile:focus-visible { border-color: var(--blue); }
+.depth-tile-frame { display: grid; place-items: center; height: 120px; background: #000; border-radius: 5px; overflow: hidden; }
+.depth-tile-frame .depth-frame { --frame-h: 120px; }
+.depth-tile-head { color: var(--muted); font-size: 0.74rem; font-variant-numeric: tabular-nums; }
+.depth-answers { display: grid; gap: 3px; }
+.depth-answer-row { display: flex; align-items: center; gap: 6px; padding: 1px 3px; border-radius: 4px; font-size: 0.76rem; }
+.depth-answer-row > b { width: 22px; color: var(--muted); }
+.depth-answer-row .depth-chip { padding: 1px 6px; }
+.depth-answer-row.is-current { background: rgba(112, 198, 241, 0.14); }
+.depth-c1-others { color: var(--muted); font-size: 0.7rem; font-variant-numeric: tabular-nums; }
+.page-jump { display: inline-flex; align-items: center; gap: 6px; color: var(--muted); }
+.page-jump input { width: 70px; }
+
+.depth-chips { display: flex; flex-wrap: wrap; gap: 5px; margin: 9px 0 4px; }
+.depth-chip { display: inline-flex; align-items: baseline; gap: 5px; padding: 3px 7px; border: 1px solid var(--line);
+  border-radius: 6px; background: #09131b; color: var(--text); font-size: 0.78rem; font-variant-numeric: tabular-nums; white-space: nowrap; }
+button.depth-chip { cursor: pointer; font-family: inherit; }
+button.depth-chip:hover { border-color: var(--blue); }
+.depth-chip b { color: var(--muted); font-weight: 700; }
+.depth-chip.is-current { box-shadow: 0 0 0 2px var(--blue); }
+.depth-shallow { border-color: #4a7f9c; }
+.depth-mid { border-color: var(--blue); }
+.depth-deep { border-color: var(--amber); }
+.depth-vdeep { border-color: var(--no); }
+.depth-x, .depth-null { color: var(--muted); border-style: dashed; }
+
+.depth-viewer .viewer-layout { grid-template-columns: minmax(0, 1.5fr) minmax(360px, 1fr); }
+.depth-shot-list { display: grid; grid-template-columns: repeat(auto-fill, minmax(420px, 1fr)); gap: 12px; padding-bottom: 20px; }
+.depth-shot { cursor: pointer; }
+.depth-shot .shot-head { margin: 0 0 7px; }
+.depth-shot .shot-head .depth-play { margin-left: auto; padding: 3px 10px; min-height: 0; }
+.depth-shot .shot-frame { display: grid; place-items: center; aspect-ratio: auto; height: 154px; }
+.shot-frame.frame-key { border-color: var(--blue); }
+.depth-shot .frame-answer { z-index: 1; }
+
+.depth-subhead { margin: 22px 0 8px; font-size: 0.95rem; color: var(--muted); font-weight: 600; }
+.depth-table { width: 100%; border-collapse: collapse; font-size: 0.8rem; font-variant-numeric: tabular-nums; }
+.depth-table th, .depth-table td { padding: 4px 6px; border-bottom: 1px solid var(--line); text-align: left; }
+.depth-table th { color: var(--muted); font-weight: 600; }
+
+.prompt-tabs { display: flex; gap: 4px; margin-bottom: 8px; }
+.prompt-tab { padding: 5px 12px; min-height: 0; border: 1px solid var(--line); border-radius: 6px; background: #09131b; color: var(--text); cursor: pointer; }
+.prompt-tab[aria-selected="true"] { border-color: var(--blue); background: rgba(112, 198, 241, 0.16); }
+.prompt-body { display: grid; gap: 8px; }
+.prompt-legend { margin: 0; color: var(--muted); font-size: 0.75rem; }
+.prompt-text { margin: 0; padding: 8px 10px; border-left: 3px solid var(--blue); border-radius: 4px; background: #09131b;
+  white-space: pre-wrap; word-break: break-word; font: 0.76rem/1.45 ui-monospace, SFMono-Regular, Menlo, monospace; }
+.prompt-video { border-left-color: var(--amber); max-height: 260px; overflow-y: auto; }
+.prompt-images { display: grid; gap: 4px; }
+.prompt-images-3 { grid-template-columns: repeat(3, 1fr); }
+.prompt-images .depth-frame { border-radius: 4px; }
+.prompt-note { grid-column: 1 / -1; color: var(--muted); font-size: 0.72rem; }
+.prompt-answer { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; padding: 8px 0; font-size: 0.85rem; }
+
+@media (max-width: 1100px) {
+  .depth-filters { grid-template-columns: repeat(3, minmax(140px, 1fr)); }
+  .depth-viewer .viewer-layout { grid-template-columns: 1fr; overflow-y: auto; }
+  .depth-shot-list { grid-template-columns: 1fr; }
+}
+@media (max-width: 560px) { .depth-filters { grid-template-columns: 1fr; } }
