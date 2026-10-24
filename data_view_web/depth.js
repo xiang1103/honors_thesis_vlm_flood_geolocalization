@@ -1,6 +1,6 @@
 "use strict";
 
-// The depth page of the GIS review site: one full run of the water-depth
+// The depth page of the data_view site: one full run of the water-depth
 // benchmark (experiments/flood_depth/run_all.py). The run's fixed parts come
 // once from /api/depth/meta; videos come ONE PAGE at a time from /api/depth,
 // which filters, sorts and paginates on the server (depth_review.query) --

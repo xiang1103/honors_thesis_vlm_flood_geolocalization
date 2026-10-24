@@ -6,7 +6,7 @@ downloads or saves image files locally.
 Output follows the same two-stage shape as scrape.py: each classification is
 appended to a JSONL as soon as it lands (so a crash or a credit limit loses
 nothing mid-run), and at the end that JSONL is MERGED into the canonical
-data/mycoast_data/verified_images_news.json and deleted. The canonical JSON is therefore
+data/news/verified_images_news.json and deleted. The canonical JSON is therefore
 the store of record, and the thing a re-run reads to know which images have
 already been paid for. Pass --keep-jsonl to retain the intermediate file.
 """
@@ -149,7 +149,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--final-output",
         type=Path,
-        default=project_root / "data" / "mycoast_data" / "verified_images_news.json",
+        default=project_root / "data" / "news" / "verified_images_news.json",
         help="Canonical JSON with the latest valid result for each occurrence. "
              "This is the resumable store of record.",
     )

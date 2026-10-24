@@ -1,6 +1,6 @@
 "use strict";
 
-// The shot page of the GIS review site: the per-shot flood scan
+// The shot page of the data_view site: the per-shot flood scan
 // (experiments/scene_split/scan_shots.py) over /api/shots. One card per
 // scanned video with its shots on a timeline; the viewer lists every shot
 // with the frames the model judged and its answers, and plays any shot's

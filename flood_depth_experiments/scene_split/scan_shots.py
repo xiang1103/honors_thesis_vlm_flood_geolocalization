@@ -27,7 +27,7 @@ yet"), in a pipeline:
     7. append one line per video to the ledger, flushed at once
     8. save every sampled frame as a small JPEG (FRAME_WIDTH px wide) in
        <ledger-dir>/frames/<video_id>/shot<k>_<j>.jpg, so the review page
-       (gis_review_server.py, /shots.html) shows exactly what the model saw.
+       (data_view_server.py, /shots.html) shows exactly what the model saw.
        Stills, not video; gitignored, never published. --no-frames turns it off.
 
 Ledger: one JSONL file PER WORKER in scrape_data/youtube_shot_scan/

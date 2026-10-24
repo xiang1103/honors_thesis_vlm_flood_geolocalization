@@ -12,7 +12,7 @@ street-view images — by model and by eye. Two collection techniques:
 > street level. News is kept as a supplement and is not being extended.
 
 ```
-scrape ──► data/news/news_scrape_results.json ──► Text matching to find flood news + VLM to verify which images are good ──► data/mycoast_data/verified_images_news.json
+scrape ──► data/news/news_scrape_results.json ──► Text matching to find flood news + VLM to verify which images are good ──► data/news/verified_images_news.json
                     (the corpus)                                          │
                                        filter_nyc.py ──► nyc_scraped_images.json
                                                                           │
@@ -90,7 +90,7 @@ A second source alongside the news crawl: public APIs whose records carry
 image URLs, text, and (mostly) coordinates.
 
 ```
-gis_scrape.py ──► data/gis_data/gis_flood_images.json ──► GIS review site :8768
+gis_scrape.py ──► data/gis_data/gis_flood_images.json ──► data_view site :8768
 ```
 
 | source | what | coordinates |
@@ -109,12 +109,12 @@ python3 scraping/api_based_scraping/gis_scrape.py                       # all so
 python3 scraping/api_based_scraping/gis_scrape.py --sources mycoast,stn # a subset; other sources' rows are kept
 ```
 
-### GIS review site
+### data_view site
 Scraped different government GIS apis, only myCoast API is used for most of the street view images. 
 
 ```bash
-python3 gis_review_server.py                     # http://127.0.0.1:8768
-python3 gis_review_server.py --port 8770         # if 8768 is taken
+python3 data_view_server.py                     # http://127.0.0.1:8768
+python3 data_view_server.py --port 8770         # if 8768 is taken
 ```
 
 ## 5. MyCoast in depth

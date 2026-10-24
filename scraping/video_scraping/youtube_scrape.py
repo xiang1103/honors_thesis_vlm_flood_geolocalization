@@ -21,7 +21,7 @@ Steps:
                    in_ny / in_nyc; coordinates tested against the Census NY
                    boundary when the uploader set them.
   4. thumbnails    i.ytimg.com cover + three auto-frames per video, fetched
-                   and fingerprinted (shared data/news/image_hashes.json). Only
+                   and fingerprinted (shared data/image_hashes.json). Only
                    thumbnails that decode are kept -- that is the proof they
                    display; exact repeats within one video are dropped.
   5. write         merged into the existing file (never overwritten),

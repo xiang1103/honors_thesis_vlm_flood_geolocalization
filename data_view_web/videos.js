@@ -1,6 +1,6 @@
 "use strict";
 
-// The video page of the GIS review site. Same layout, decisions and keyboard
+// The video page of the data_view site. Same layout, decisions and keyboard
 // as app.js (the photo page), over /api/videos. Thumbnails and the player load
 // from YouTube in the browser; nothing is downloaded by the server.
 

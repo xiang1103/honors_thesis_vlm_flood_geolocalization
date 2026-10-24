@@ -449,7 +449,7 @@ fetch("/api/images")
     if (serverScheme && serverScheme !== EXPECTED_SCHEME) {
       showNotice(
         `Review id scheme mismatch: this page expects "${EXPECTED_SCHEME}" but the server emits `
-        + `"${serverScheme}". Saved decisions will not match until app.js and gis_review_server.py agree.`,
+        + `"${serverScheme}". Saved decisions will not match until app.js and data_view_server.py agree.`,
         "warn",
       );
     } else if (storedScheme && storedScheme !== EXPECTED_SCHEME) {

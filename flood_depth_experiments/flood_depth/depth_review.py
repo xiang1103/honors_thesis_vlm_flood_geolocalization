@@ -1,4 +1,4 @@
-"""The data behind the review site's /depth.html (gis_review_server.py).
+"""The data behind the review site's /depth.html (data_view_server.py).
 
 Joins a full run's per-video answers (video_labels.json), its detector boxes
 (refs_*.jsonl) and the uploader text, and describes each condition's prompt

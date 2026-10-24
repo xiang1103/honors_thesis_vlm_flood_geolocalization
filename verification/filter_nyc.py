@@ -1,7 +1,7 @@
 """Find the New York images and articles in the classified flood dataset.
 
 ONE pipeline, no modes. Every flood-related article in
-``data/mycoast_data/verified_images_news.json`` is examined, and two independent checks run:
+``data/news/verified_images_news.json`` is examined, and two independent checks run:
 
 * the ARTICLE is checked by RULE -- a New York gazetteer over its headline and
   body (see STRONG_TERMS);
@@ -23,7 +23,7 @@ What is kept:
 So a New York article keeps its whole set, and a New York photograph is never
 lost just because its article was about somewhere else.
 
-Everything kept is written to ``data/mycoast_data/nyc_scraped_images.json``, articles and
+Everything kept is written to ``data/news/nyc_scraped_images.json``, articles and
 images together.
 
     python3 verification/filter_nyc.py --device-map cuda:0
@@ -386,13 +386,13 @@ def parse_args() -> argparse.Namespace:
         description="Keep the New York images and articles in the flood dataset."
     )
     parser.add_argument("--verified", type=Path,
-                        default=root / "data" / "mycoast_data" / "verified_images_news.json",
+                        default=root / "data" / "news" / "verified_images_news.json",
                         help="Classified dataset to read.")
     parser.add_argument("--corpus", type=Path,
                         default=root / "data" / "news" / "news_scrape_results.json",
                         help="Corpus supplying article text.")
     parser.add_argument("--output", type=Path,
-                        default=root / "data" / "mycoast_data" / "nyc_scraped_images.json",
+                        default=root / "data" / "news" / "nyc_scraped_images.json",
                         help="The deliverable: the New York articles and images.")
     parser.add_argument("--model-path", default=None,
                         help="Local model weights (default: local_vlm.DEFAULT_MODEL_PATH).")

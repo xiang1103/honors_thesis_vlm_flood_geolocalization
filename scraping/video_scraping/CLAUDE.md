@@ -479,7 +479,7 @@ example AI images only).
    those videos (from the flood-only file; the master keeps every video) in
    one pass -- not video by video during the scan.
 
-**Review page, 2026-10-15:** `gis_review_server.py` :8768 `/shots.html` -- one
+**Review page, 2026-10-15:** `data_view_server.py` :8768 `/shots.html` -- one
 card per scanned video with its shots on a timeline (flood / not flood /
 gap); the viewer lists every shot with the frames the model judged and its
 answers, plays any shot's range in the embed, and takes per-shot decisions
@@ -564,8 +564,8 @@ python3 scraping/video_scraping/youtube_scrape.py --plan        # searches + cos
 python3 scraping/video_scraping/youtube_scrape.py --no-search   # relabel / re-check only, ~60 units
 ```
 
-**Viewing them:** `python3 gis_review_server.py`, then the **Videos** tab
-(`http://127.0.0.1:8768/videos.html`; `gis_review_web/videos.html` +
+**Viewing them:** `python3 data_view_server.py`, then the **Videos** tab
+(`http://127.0.0.1:8768/videos.html`; `data_view_web/videos.html` +
 `videos.js`). Cards show the cover, duration, flood score, location, title,
 date, tags and description; the detail view embeds YouTube's player
 (`youtube-nocookie.com`, the only frame the site's CSP allows) above the

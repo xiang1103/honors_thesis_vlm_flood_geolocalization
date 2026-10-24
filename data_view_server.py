@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
-"""Serve the local browser for the GIS flood-photo dataset (New York State).
+"""Serve data_view, the local hub for reviewing every dataset in the project.
 
-The news reviewer's sibling. Same look and the same three-way decision
+Its front page (/) is the GIS flood-photo browser (New York State), the news
+reviewer's sibling. Same look and the same three-way decision
 (useful / reject / unsure), but it reads ``data/gis_data/gis_flood_images.json``, written
 by ``scraping/api_based_scraping/gis_scrape.py``, and shows what that data has
 instead of news: source, event, coordinates and the NYC label.
@@ -12,7 +13,7 @@ Images are never downloaded by Python; the browser loads the remote URLs
 directly -- a small thumbnail where the source offers one (MyCoast, Commons),
 falling back to the original.
 
-    python3 gis_review_server.py              # http://127.0.0.1:8768
+    python3 data_view_server.py              # http://127.0.0.1:8768
 
 A second page, /videos.html, browses the YouTube flood videos
 (``data/youtube_videos.json``, written by
@@ -56,13 +57,15 @@ DEFAULT_VIDEOS = PROJECT_DIR / "data" / "youtube_videos.json"
 DEFAULT_SHOTS = PROJECT_DIR / "scrape_data" / "youtube_shot_scan"
 DEFAULT_DEPTH = PROJECT_DIR / "scrape_data" / "experiments" / "flood_depth" / "full_5cm"
 DEPTH_CODE = PROJECT_DIR / "flood_depth_experiments" / "flood_depth"
-STATIC_DIR = PROJECT_DIR / "gis_review_web"
+STATIC_DIR = PROJECT_DIR / "data_view_web"
 #: The news site's stylesheet, served as-is so the two sites cannot drift apart
-#: visually. GIS-only rules live in gis_review_web/gis.css.
+#: visually. GIS-only rules live in data_view_web/gis.css.
 SHARED_STYLES = PROJECT_DIR / "image_review_web" / "styles.css"
 
 #: Decisions live only in the browser's localStorage, keyed by `review_id()`.
 #: Bump this if that function changes, so the page can detect it loudly.
+#: The "gis_review" name predates the rename to data_view and is kept on
+#: purpose: changing it orphans every decision already saved in browsers.
 REVIEW_ID_SCHEME = "gis_review_v1"
 #: Same idea for videos; a different scheme and storage key, so photo and
 #: video decisions can never be mistaken for each other.

@@ -223,8 +223,8 @@ python3 experiments/flood_depth/detect_refs.py                  # C5 boxes, ~0.5
 python3 experiments/flood_depth/run_conditions.py               # C1-C5, freest GPU with 60 GiB
 python3 experiments/flood_depth/run_conditions.py --conditions C2 --limit 20
 python3 experiments/flood_depth/evaluate.py                     # -> results.json
-python3 gis_review_server.py                                    # browse a full run: :8768/depth.html
-python3 gis_review_server.py --depth scrape_data/experiments/flood_depth/full   # the L0-L5 run instead
+python3 data_view_server.py                                    # browse a full run: :8768/depth.html
+python3 data_view_server.py --depth scrape_data/experiments/flood_depth/full   # the L0-L5 run instead
 ```
 
 `/depth.html` (data from `depth_review.py`) shows, per video, every shot's
