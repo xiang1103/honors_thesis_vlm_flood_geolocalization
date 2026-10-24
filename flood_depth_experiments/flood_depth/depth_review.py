@@ -31,6 +31,7 @@ from levels import REFERENCE_HEIGHTS, midpoint_cm
 
 PROJECT = Path(__file__).resolve().parents[2]
 VIDEOS_FILE = PROJECT / "data" / "youtube_videos.json"
+LEDGER_DIR = PROJECT / "scrape_data" / "youtube_shot_scan"
 DEFAULT_RUN = PROJECT / "scrape_data" / "experiments" / "flood_depth" / "full_5cm"
 CONDS = ["C1", "C2", "C3", "C4", "C5"]
 KEY = 1
@@ -79,6 +80,24 @@ def read_boxes(run_dir: Path, detector: str | None) -> dict[str, list]:
     return out
 
 
+def key_frame_times(video_ids: set[str], ledger_dir: Path = LEDGER_DIR) -> dict[tuple[str, int], float]:
+    """(video_id, shot number) -> time of the key frame in seconds, from the
+    shot-scan ledger (a finished line wins over an error, as in
+    scan_shots.read_ledger, which is not imported: it pulls in torch)."""
+    rows: dict[str, dict] = {}
+    for row in _jsonl(sorted(ledger_dir.glob("*.jsonl"))):
+        vid = row.get("video_id")
+        if vid in video_ids and "shots" in row:
+            rows[vid] = row
+    out = {}
+    for vid, row in rows.items():
+        for k, shot in enumerate(row["shots"]):
+            frames = shot.get("frames") or []
+            if len(frames) > KEY:
+                out[(vid, k + 1)] = frames[KEY].get("t")
+    return out
+
+
 def load_depth_catalog(run_dir: Path, videos_file: Path = VIDEOS_FILE) -> dict:
     labels_file = run_dir / "video_labels.json"
     empty = {"available": False, "run_dir": str(run_dir), "items": []}
@@ -91,13 +110,15 @@ def load_depth_catalog(run_dir: Path, videos_file: Path = VIDEOS_FILE) -> dict:
     if videos_file.is_file():
         meta = {v["video_id"]: v for v in json.loads(videos_file.read_text(encoding="utf-8"))}
     run = {**labels["run"], "detector": head.get("detector")}
+    times = key_frame_times(set(labels["videos"]))
     items = []
     for vid, video in labels["videos"].items():
         v = meta.get(vid, {})
         shots = []
         for s in video["shots"]:
             iid = f"{vid}:shot{s['s']:03d}"
-            shots.append({**s, "b": boxes.get(iid)})        # [label, score, x0, y0, x1, y1] in 0-1
+            shots.append({**s, "b": boxes.get(iid),        # [label, score, x0, y0, x1, y1] in 0-1
+                          "kt": times.get((vid, s["s"]))})  # key frame's time, s
         items.append({
             "video_id": vid,
             "title": v.get("title") or vid,

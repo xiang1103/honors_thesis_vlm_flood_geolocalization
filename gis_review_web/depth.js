@@ -6,9 +6,10 @@
 // which filters, sorts and paginates on the server (depth_review.query) --
 // the whole run is ~5 MB, a page ~40 KB.
 //
-// One card per video; inside it, every flood shot with its key frame and the
-// answer of each condition C1-C5. Clicking a shot opens the viewer: the
-// player, all three frames, and the exact prompt each condition was given --
+// One card per video; inside it, every flood shot as ONE frame (the key
+// frame, the one C1/C3-C5 were shown), its time and the answer of each
+// condition C1-C5. Clicking a shot opens the viewer: the player, the same
+// frame and answers, and the exact prompt each condition was given --
 // the uploader text (C3), the height table (C4, C5) and the detector boxes
 // drawn as C5 saw them (conditions.draw_boxes: numbered from 1, in the cached
 // order, colours from BOX_COLOURS). Read-only: no decisions.
@@ -158,6 +159,13 @@ function frameView(item, shot, j, { boxes = false } = {}) {
 
 // -- cards: one per video, its shots inside ---------------------------------
 
+/** "0:41.2 (shot 0:38.3–0:43.6)": when the shown frame is, and its shot. */
+function frameTime(shot) {
+  const when = shot.kt == null ? "" : clock(shot.kt);
+  const range = shot.t ? `shot ${clock(shot.t[0])}–${clock(shot.t[1])}` : "";
+  return when && range ? `${when} (${range})` : when || range;
+}
+
 function labelText(label) {
   if (!label.deepest) return label.x ? "X" : null;
   return label.median_cm == null ? label.deepest : `${label.deepest} · med ${label.median_cm}`;
@@ -172,19 +180,13 @@ function shotTile(item, shot, index, videoIndex) {
   const picture = node("span", "depth-tile-frame");
   picture.append(frameView(item, shot, KEY, { boxes: ui.showBoxes.checked }));
   tile.append(picture);
-  tile.append(node("span", "depth-tile-head",
-    `Shot ${shot.s}${shot.t ? ` · ${clock(shot.t[0])}–${clock(shot.t[1])}` : ""}`
-    + (shot.b && shot.b.length ? ` · ${shot.b.length} box${shot.b.length === 1 ? "" : "es"}` : "")));
+  tile.append(node("span", "depth-tile-head", `Shot ${shot.s} · ${frameTime(shot)}`));
   const rows = node("span", "depth-answers");
   const current = ui.condition.value;
   for (const c of CONDS) {
     const row = node("span", `depth-answer-row ${c === current ? "is-current" : ""}`.trim());
     row.append(node("b", "", c));
     row.append(chip(answerOf(shot, c)));
-    if (c === "C1") {
-      // the other two frames, asked separately: shows how much one frame moves the answer
-      row.append(node("span", "depth-c1-others", `${shot.C1[0] ?? "?"} / ${shot.C1[2] ?? "?"}`));
-    }
     rows.append(row);
   }
   tile.append(rows);
@@ -296,13 +298,36 @@ function openViewer(index, shot = null) {
   if (!ui.viewer.open) ui.viewer.showModal();
 }
 
+// The player is loaded ONCE per video (the whole video, normal controls and
+// timeline) and a shot click SEEKS it through YouTube's postMessage API
+// (enablejsapi=1) -- reloading the iframe with start/end for every shot gave
+// a 4-second clip that stopped at once and hid the controls. The CSP allows
+// no YouTube script, so commands are posted directly, not via iframe_api.
+let playerLoaded = false;
+
+function loadPlayer(item, start = 0) {
+  playerLoaded = false;
+  // YouTube's player refuses to start without a referrer (error 153).
+  ui.player.referrerPolicy = "strict-origin-when-cross-origin";
+  ui.player.src = `${item.embed_url}?enablejsapi=1&origin=${encodeURIComponent(location.origin)}`
+    + `&start=${Math.floor(start)}&rel=0&playsinline=1`;
+}
+
+function playerCommand(func, args = []) {
+  ui.player.contentWindow?.postMessage(JSON.stringify({ event: "command", func, args }), "*");
+}
+
 function playShot(index) {
   const item = state.items[state.viewerIndex];
   const shot = item && item.shots[index];
   if (!shot || !shot.t) return;
-  // The embed takes whole seconds; floor/ceil so the shot is never cut short.
-  ui.player.src = `${item.embed_url}?start=${Math.floor(shot.t[0])}&end=${Math.ceil(shot.t[1])}`
-    + "&autoplay=1&rel=0&modestbranding=1";
+  if (!playerLoaded) {                     // not ready for commands yet: reload at the shot instead
+    loadPlayer(item, shot.t[0]);
+    ui.player.addEventListener("load", () => setTimeout(() => playerCommand("playVideo"), 500), { once: true });
+    return;
+  }
+  playerCommand("seekTo", [shot.t[0], true]);
+  playerCommand("playVideo");
 }
 
 function selectShot(index, cond = state.cond, play = false) {
@@ -329,22 +354,13 @@ function shotCard(item, shot, index) {
   const play = node("button", "secondary depth-play", "▶ Play");
   play.type = "button";
   play.addEventListener("click", () => selectShot(index, state.cond, true));
-  head.append(node("b", "", `Shot ${shot.s}`),
-    node("span", "", shot.t ? `${clock(shot.t[0])}–${clock(shot.t[1])} (${(shot.t[1] - shot.t[0]).toFixed(1)} s)` : ""),
-    node("span", "muted", shot.b && shot.b.length ? `${shot.b.length} detected object${shot.b.length === 1 ? "" : "s"}` : "no detections"),
-    play);
+  play.title = "Jump the player to this shot";
+  head.append(node("b", "", `Shot ${shot.s}`), node("span", "", frameTime(shot)), play);
   card.append(head);
 
-  // The three frames, each with its own C1 answer; the key frame (C1/C3-C5's
-  // input) is marked and carries the boxes.
-  const frames = node("div", "shot-frames frames-3");
-  [0, 1, 2].forEach((j) => {
-    const cell = node("span", `shot-frame ${j === KEY ? "frame-key" : ""}`.trim());
-    cell.append(frameView(item, shot, j, { boxes: j === KEY && ui.showBoxes.checked }));
-    cell.append(node("span", "frame-answer", `${j === KEY ? "key · " : ""}C1 ${shot.C1[j] ?? "?"}`));
-    frames.append(cell);
-  });
-  card.append(frames);
+  const picture = node("div", "depth-tile-frame depth-shot-frame");
+  picture.append(frameView(item, shot, KEY, { boxes: ui.showBoxes.checked }));
+  card.append(picture);
 
   const answers = node("div", "depth-chips");
   for (const c of CONDS) {
@@ -356,8 +372,9 @@ function shotCard(item, shot, index) {
     answers.append(element);
   }
   card.append(answers);
+  // clicking the shot (not one of its condition buttons) jumps the player to it
   card.addEventListener("click", (event) => {
-    if (!event.target.closest("button")) selectShot(index);
+    if (!event.target.closest("button")) selectShot(index, state.cond, true);
   });
   return card;
 }
@@ -407,37 +424,29 @@ function renderPrompt() {
         : state.meta.no_boxes;
       return node("pre", "prompt-text prompt-video", text);
     }
-    const js = Array.isArray(part.image) ? part.image : [part.image];
-    const images = node("div", `prompt-images prompt-images-${js.length}`);
-    for (const j of js) images.append(frameView(item, shot, j, { boxes: Boolean(part.boxes) }));
-    images.append(node("span", "prompt-note",
-      `image${js.length > 1 ? "s" : ""}: frame${js.length > 1 ? "s" : ""} ${js.map((j) => j + 1).join(", ")} of 3`
-      + `, upscaled to ${state.meta.image_long_side} px${part.boxes ? ", boxes drawn" : ""}`));
-    return images;
+    // Images are named, not repeated: the shot's frame is shown once, beside its answers.
+    const text = Array.isArray(part.image)
+      ? `[${part.image.length} images: the shot's frames at 10%, 50% and 90% of its length]`
+      : `[image: the shot's frame${shot.kt == null ? "" : ` at ${clock(shot.kt)}`}`
+        + `${part.boxes ? ", with the numbered detector boxes drawn on it" : ""}]`;
+    return node("p", "prompt-image", `${text} · ${state.meta.image_long_side} px long side`);
   });
   const answer = node("div", "prompt-answer");
   answer.append(node("span", "", "Model answered"), chip(answerOf(shot, cond)));
-  if (cond === "C1") {
-    answer.append(node("span", "muted",
-      `(key frame; the other frames, asked separately: ${shot.C1[0] ?? "?"}, ${shot.C1[2] ?? "?"})`));
-  }
   ui.promptBody.replaceChildren(
     node("p", "prompt-legend", "Blue-edged text is the same for every video; amber-edged text is this video's or shot's own."),
     ...parts, answer);
 }
 
-function renderViewer(shotIndex = null) {
+function renderViewer(shotIndex = null, reloadPlayer = true) {
   const item = state.items[state.viewerIndex];
   if (!item) return;
-  // YouTube's player refuses to start without a referrer (error 153).
-  ui.player.referrerPolicy = "strict-origin-when-cross-origin";
-  ui.player.src = `${item.embed_url}?rel=0&modestbranding=1`;
   ui.viewerTitle.textContent = item.title;
   ui.viewerSourceLink.href = item.source_url;
   renderLabelTable(item);
   ui.shotList.replaceChildren(...item.shots.map((shot, index) => shotCard(item, shot, index)));
   ui.shotCount.textContent = `${item.shots.length} flood shot${item.shots.length === 1 ? "" : "s"} · `
-    + "click a condition's answer to see its prompt";
+    + "click a shot to jump the player there, a condition's answer to see its prompt";
   const size = state.meta.page_size;
   const position = (state.page - 1) * size + state.viewerIndex + 1;
   ui.viewerPosition.textContent = `${position} / ${state.total}`;
@@ -448,6 +457,8 @@ function renderViewer(shotIndex = null) {
     const deepest = item.label[ui.condition.value].deepest_shot;
     shotIndex = Math.max(0, item.shots.findIndex((s) => s.s === deepest));
   }
+  const shot = item.shots[shotIndex];
+  if (reloadPlayer) loadPlayer(item, shot && shot.t ? shot.t[0] : 0);   // cued at the shot, not playing
   selectShot(shotIndex, ui.condition.value);
 }
 
@@ -470,7 +481,7 @@ for (const control of [ui.condition, ui.filter, ui.location, ui.sortOrder]) {
 }
 ui.showBoxes.addEventListener("change", () => {
   renderGrid();
-  if (ui.viewer.open) renderViewer(state.shot);
+  if (ui.viewer.open) renderViewer(state.shot, false);
 });
 let searchTimer = null;
 ui.search.addEventListener("input", () => {
@@ -489,6 +500,11 @@ ui.pageJump.addEventListener("change", () => {
 });
 ui.closeViewer.addEventListener("click", () => ui.viewer.close());
 ui.viewer.addEventListener("close", () => { ui.player.src = "about:blank"; });   // stops playback
+ui.player.addEventListener("load", () => {
+  playerLoaded = !ui.player.src.startsWith("about:");
+  // the API answers commands only after this handshake
+  ui.player.contentWindow?.postMessage(JSON.stringify({ event: "listening", id: "depth-player" }), "*");
+});
 ui.previousVideo.addEventListener("click", () => moveViewer(-1));
 ui.nextVideo.addEventListener("click", () => moveViewer(1));
 ui.viewer.addEventListener("click", (event) => {

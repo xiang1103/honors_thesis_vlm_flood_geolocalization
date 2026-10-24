@@ -229,7 +229,9 @@ button.tl-shot:hover { filter: brightness(1.25); }
 .depth-answer-row > b { width: 22px; color: var(--muted); }
 .depth-answer-row .depth-chip { padding: 1px 6px; }
 .depth-answer-row.is-current { background: rgba(112, 198, 241, 0.14); }
-.depth-c1-others { color: var(--muted); font-size: 0.7rem; font-variant-numeric: tabular-nums; }
+.depth-shot-frame { height: 240px; margin-bottom: 4px; }
+.depth-shot-frame .depth-frame { --frame-h: 240px; }
+.prompt-image { margin: 0; padding: 6px 10px; border: 1px dashed var(--line); border-radius: 4px; color: var(--muted); font-size: 0.76rem; }
 .page-jump { display: inline-flex; align-items: center; gap: 6px; color: var(--muted); }
 .page-jump input { width: 70px; }
 
