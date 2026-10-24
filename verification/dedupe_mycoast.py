@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Find duplicate images in data/mycoast.json by CONTENT and drop the repeats.
+Find duplicate images in data/mycoast_data/mycoast.json by CONTENT and drop the repeats.
 
 `dedupe.py` works on the verifier's flat one-row-per-image file. MyCoast is
 shaped differently -- one row per REPORT with its images nested -- so a
@@ -51,7 +51,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 from dedupe import DEFAULT_CACHE, fetch_digests, near_duplicate_clusters  # noqa: E402
 
 PROJECT = Path(__file__).resolve().parents[1]
-DEFAULT_INPUT = PROJECT / "data" / "mycoast.json"
+DEFAULT_INPUT = PROJECT / "data" / "mycoast_data" / "mycoast.json"
 
 
 def write_json(path: Path, rows: list[dict[str, Any]]) -> None:

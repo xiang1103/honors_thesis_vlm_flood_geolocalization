@@ -65,7 +65,7 @@ from shapely.prepared import prep
 from shapely.validation import make_valid
 
 PROJECT_DIR = Path(__file__).resolve().parents[2]
-DEFAULT_OUTPUT = PROJECT_DIR / "data" / "gis_flood_images.json"
+DEFAULT_OUTPUT = PROJECT_DIR / "data" / "gis_data" / "gis_flood_images.json"
 
 USER_AGENT = "vlm_flood-research/0.1 (honors thesis flood image dataset; python-requests)"
 

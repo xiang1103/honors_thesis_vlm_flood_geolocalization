@@ -1,6 +1,6 @@
 """Read every flood article and record WHICH COUNTRIES FLOODED.
 
-One pass over `data/news_scrape_results.json`, restricted to the articles
+One pass over `data/news/news_scrape_results.json`, restricted to the articles
 `verify_text.py` marked `flood_verified`. Images are irrelevant here, so this
 reads the CORPUS rather than `verified_images_news.json`: the corpus is the
 superset, and ~1,650 flood articles carry no image at all and would otherwise
@@ -309,9 +309,9 @@ def parse_args() -> argparse.Namespace:
         description="Record which countries flooded, per flood article."
     )
     parser.add_argument("--corpus", type=Path,
-                        default=ROOT / "data" / "news_scrape_results.json")
+                        default=ROOT / "data" / "news" / "news_scrape_results.json")
     parser.add_argument("--output", type=Path,
-                        default=ROOT / "data" / "article_countries.json")
+                        default=ROOT / "data" / "map_view" / "article_countries.json")
     parser.add_argument("--ledger", type=Path,
                         default=ROOT / "scrape_data" / "article_country_judgements.json")
     parser.add_argument("--model-path", default=None,
@@ -432,7 +432,7 @@ def main() -> int:
         write_json(args.output, {
             "summary": summary,
             "prompt": PROMPT,
-            "iso_table": "data/iso_3166.json",
+            "iso_table": "data/map_view/iso_3166.json",
             "join_key": "article_url",
             "results": results,
         })

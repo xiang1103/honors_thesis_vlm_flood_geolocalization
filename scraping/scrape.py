@@ -54,7 +54,7 @@ from make_metadata import refresh_quietly    # noqa: E402
 #: The one file every outlet's crawl merges into. Per-outlet JSONs are gone:
 #: the JSONL is still per-outlet (crash safety during a run) but it is merged
 #: straight into this corpus, which is also what supplies the seen-URL set.
-DEFAULT_CORPUS = Path(__file__).resolve().parents[1] / "data" / "news_scrape_results.json"
+DEFAULT_CORPUS = Path(__file__).resolve().parents[1] / "data" / "news" / "news_scrape_results.json"
 
 #: Canonical key order for every emitted record. Human-facing fields first
 #: (title/outlet/date), then the payload, then machine metadata. Python dicts
@@ -531,7 +531,7 @@ def main():
     ap.add_argument("--min-images", type=int, default=0)
     ap.add_argument("--corpus", type=Path, default=DEFAULT_CORPUS,
                     help="the single corpus every outlet merges into "
-                         "(default: data/news_scrape_results.json)")
+                         "(default: data/news/news_scrape_results.json)")
     args = ap.parse_args()
 
     if args.list_outlets:

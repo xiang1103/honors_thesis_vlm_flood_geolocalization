@@ -2,7 +2,7 @@
 """Serve the local browser for the GIS flood-photo dataset (New York State).
 
 The news reviewer's sibling. Same look and the same three-way decision
-(useful / reject / unsure), but it reads ``data/gis_flood_images.json``, written
+(useful / reject / unsure), but it reads ``data/gis_data/gis_flood_images.json``, written
 by ``scraping/api_based_scraping/gis_scrape.py``, and shows what that data has
 instead of news: source, event, coordinates and the NYC label.
 
@@ -51,11 +51,11 @@ from urllib.parse import parse_qs, quote, unquote, urlparse
 
 
 PROJECT_DIR = Path(__file__).resolve().parent
-DEFAULT_RESULTS = PROJECT_DIR / "data" / "gis_flood_images.json"
+DEFAULT_RESULTS = PROJECT_DIR / "data" / "gis_data" / "gis_flood_images.json"
 DEFAULT_VIDEOS = PROJECT_DIR / "data" / "youtube_videos.json"
 DEFAULT_SHOTS = PROJECT_DIR / "scrape_data" / "youtube_shot_scan"
 DEFAULT_DEPTH = PROJECT_DIR / "scrape_data" / "experiments" / "flood_depth" / "full_5cm"
-DEPTH_CODE = PROJECT_DIR / "experiments" / "flood_depth"
+DEPTH_CODE = PROJECT_DIR / "flood_depth_experiments" / "flood_depth"
 STATIC_DIR = PROJECT_DIR / "gis_review_web"
 #: The news site's stylesheet, served as-is so the two sites cannot drift apart
 #: visually. GIS-only rules live in gis_review_web/gis.css.

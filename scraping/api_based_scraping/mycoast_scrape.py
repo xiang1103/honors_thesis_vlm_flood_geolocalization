@@ -19,7 +19,7 @@ and marine debris; add them to `REPORT_TYPES` if they are ever wanted.
 ONE ROW PER REPORT, with its images nested, because that is the shape the page
 data is in: "What is Flooded" describes the report, not one photograph. Each
 image still carries the `record_id` that `gis_scrape.py` gives it, so rows join
-back to `data/gis_flood_images.json` and to review decisions.
+back to `data/gis_data/gis_flood_images.json` and to review decisions.
 
 Pages are cached in `scrape_data/mycoast_pages.jsonl` (append+flush per page).
 Unlike the crawl's JSONL this is NOT deleted after the merge: it is what makes
@@ -70,7 +70,7 @@ from gis_scrape import (  # noqa: E402
 )
 
 PROJECT_DIR = Path(__file__).resolve().parents[2]
-DEFAULT_OUTPUT = PROJECT_DIR / "data" / "mycoast.json"
+DEFAULT_OUTPUT = PROJECT_DIR / "data" / "mycoast_data" / "mycoast.json"
 DEFAULT_PAGE_CACHE = MYCOAST_PAGE_CACHE
 
 STATE = "NY"

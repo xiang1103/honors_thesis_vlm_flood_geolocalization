@@ -7,9 +7,9 @@ images, and drifted apart in what they showed about them. They are merged here:
 the model's verdict, the New York judgement and the human's decision are three
 facts about one image, so they belong on one card.
 
-Reads ``data/verified_images_news.json`` (the classified dataset, not the raw
+Reads ``data/mycoast_data/verified_images_news.json`` (the classified dataset, not the raw
 corpus), so every image shown has already been fetched, judged and
-deduplicated. New York labels from ``data/nyc_scraped_images.json`` are joined
+deduplicated. New York labels from ``data/mycoast_data/nyc_scraped_images.json`` are joined
 on when that file exists.
 
 Images are never downloaded by Python; the browser loads the original remote
@@ -30,8 +30,8 @@ from urllib.parse import urlparse
 
 
 PROJECT_DIR = Path(__file__).resolve().parent
-DEFAULT_RESULTS = PROJECT_DIR / "data" / "verified_images_news.json"
-DEFAULT_NYC_FILE = PROJECT_DIR / "data" / "nyc_scraped_images.json"
+DEFAULT_RESULTS = PROJECT_DIR / "data" / "mycoast_data" / "verified_images_news.json"
+DEFAULT_NYC_FILE = PROJECT_DIR / "data" / "mycoast_data" / "nyc_scraped_images.json"
 STATIC_DIR = PROJECT_DIR / "image_review_web"
 
 #: Bump when the shape of `review_id()` changes. The browser stores this

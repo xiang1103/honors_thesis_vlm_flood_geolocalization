@@ -1,4 +1,4 @@
-"""Generate `data/iso_3166.json`, the country reference table.
+"""Generate `data/map_view/iso_3166.json`, the country reference table.
 
 Run once. The table is a standard -- 249 entries that change every few years --
 so it is CHECKED IN as data rather than looked up at runtime. That keeps the
@@ -8,7 +8,7 @@ and imports nothing.
     pip install pycountry
     python3 verification/make_iso_table.py
 
-The starter alias file (`data/country_aliases.json`) is written only if it does
+The starter alias file (`data/map_view/country_aliases.json`) is written only if it does
 not already exist -- it is hand-maintained from then on, and regenerating the
 ISO table must never silently discard aliases added by hand.
 """
@@ -86,9 +86,9 @@ def write_json(path: Path, payload: Any) -> None:
 def main() -> int:
     root = Path(__file__).resolve().parents[1]
     parser = argparse.ArgumentParser(description="Generate the ISO 3166-1 table.")
-    parser.add_argument("--output", type=Path, default=root / "data" / "iso_3166.json")
+    parser.add_argument("--output", type=Path, default=root / "data" / "map_view" / "iso_3166.json")
     parser.add_argument("--aliases", type=Path,
-                        default=root / "data" / "country_aliases.json")
+                        default=root / "data" / "map_view" / "country_aliases.json")
     args = parser.parse_args()
 
     try:

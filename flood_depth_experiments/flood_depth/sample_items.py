@@ -37,7 +37,7 @@ from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
 PROJECT = HERE.parents[1]
-sys.path.insert(0, str(PROJECT / "experiments" / "scene_split"))
+sys.path.insert(0, str(PROJECT / "flood_depth_experiments" / "scene_split"))
 from scan_shots import LEDGER_DIR, frame_path, read_ledger  # noqa: E402
 
 VIDEOS_FILE = PROJECT / "data" / "youtube_videos.json"

@@ -9,12 +9,12 @@ seconds and no GPU. So an alias added by hand is one re-run away from being
 applied to every article, instead of an hour of inference.
 
     python3 verification/make_iso_table.py                     # once
-    python3 verification/country_codes.py data/article_countries.json
+    python3 verification/country_codes.py data/map_view/article_countries.json
 
 The cascade, first hit wins, per country:
 
   exact       the normalised name is an ISO name, official name or common name
-  alias       it is in data/country_aliases.json ("britain", "drc", "usa")
+  alias       it is in data/map_view/country_aliases.json ("britain", "drc", "usa")
   code_guess  the name resolved to nothing but the model's own alpha-2 is real
   unresolved  none of the above -- recorded, never guessed at
 
@@ -42,8 +42,8 @@ from pathlib import Path
 from typing import Any
 
 ROOT = Path(__file__).resolve().parents[1]
-DEFAULT_TABLE = ROOT / "data" / "iso_3166.json"
-DEFAULT_ALIASES = ROOT / "data" / "country_aliases.json"
+DEFAULT_TABLE = ROOT / "data" / "map_view" / "iso_3166.json"
+DEFAULT_ALIASES = ROOT / "data" / "map_view" / "country_aliases.json"
 
 #: Wordings that wrap a country name rather than naming a different place.
 #: Stripped before the second lookup attempt, so "the Republic of Zambia" and
@@ -294,7 +294,7 @@ def main() -> int:
         description="Re-resolve country names in a locate_articles.py result file."
     )
     parser.add_argument("results", type=Path, nargs="?",
-                        default=ROOT / "data" / "article_countries.json")
+                        default=ROOT / "data" / "map_view" / "article_countries.json")
     parser.add_argument("--table", type=Path, default=DEFAULT_TABLE)
     parser.add_argument("--aliases", type=Path, default=DEFAULT_ALIASES)
     parser.add_argument("--output", type=Path, default=None,

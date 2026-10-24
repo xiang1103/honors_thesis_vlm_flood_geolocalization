@@ -269,7 +269,7 @@ NY_STANDALONE = [
 
 #: Counted ONLY alongside a NY marker (or a standalone hit): each is also a
 #: common word, another state's town, or another country. Extended at run
-#: time with every `place` in data/mycoast.json -- 232 NY localities, many of
+#: time with every `place` in data/mycoast_data/mycoast.json -- 232 NY localities, many of
 #: them (Mexico, Jordan, Memphis, Geneva, Cairo, Kent) far more famous elsewhere.
 NYC_NEEDS_MARKER = [
     "Queens", "Astoria", "Flushing", "Jamaica", "Corona", "Woodside", "Sunnyside",
@@ -329,7 +329,7 @@ class Gazetteer:
     """Place-name matcher for New York. Build once, apply per video."""
 
     def __init__(self, mycoast_places: Iterable[tuple[str, str]] = ()):
-        """`mycoast_places`: (place, county) pairs from data/mycoast.json."""
+        """`mycoast_places`: (place, county) pairs from data/mycoast_data/mycoast.json."""
         nyc_marker_only = set(NYC_NEEDS_MARKER)
         ny_marker_only = set(NY_NEEDS_MARKER)
         standalone = set(NYC_STANDALONE) | set(NY_STANDALONE)

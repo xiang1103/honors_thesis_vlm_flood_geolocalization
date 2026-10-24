@@ -1,11 +1,11 @@
-"""Compile `data/article_countries.json` into country totals ready to plot.
+"""Compile `data/map_view/article_countries.json` into country totals ready to plot.
 
 Two artefacts, because the two shapes answer different questions:
 
-* `data/country_totals.json` -- one row per country, for a choropleth. Join it
+* `data/map_view/country_totals.json` -- one row per country, for a choropleth. Join it
   to a world map on `alpha_3` (Natural Earth and the standard world TopoJSON
   both key on it); `alpha_2` is there for ISO 3166-2 work later.
-* `data/country_rows.csv` -- one row per (article, country), flat, for pandas
+* `data/map_view/country_rows.csv` -- one row per (article, country), flat, for pandas
   and for any per-year or per-outlet cut.
 
 SECONDARY MENTIONS ARE INCLUDED in both, by the owner's decision. An article
@@ -115,11 +115,11 @@ def compile_totals(rows: list[dict[str, Any]]) -> tuple[list[dict[str, Any]], di
 def main() -> int:
     parser = argparse.ArgumentParser(description="Compile country totals for plotting.")
     parser.add_argument("--results", type=Path,
-                        default=ROOT / "data" / "article_countries.json")
+                        default=ROOT / "data" / "map_view" / "article_countries.json")
     parser.add_argument("--totals", type=Path,
-                        default=ROOT / "data" / "country_totals.json")
+                        default=ROOT / "data" / "map_view" / "country_totals.json")
     parser.add_argument("--rows", type=Path,
-                        default=ROOT / "data" / "country_rows.csv")
+                        default=ROOT / "data" / "map_view" / "country_rows.csv")
     args = parser.parse_args()
 
     if not args.results.exists():

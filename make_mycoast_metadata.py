@@ -3,7 +3,7 @@
 
     python3 make_mycoast_metadata.py
 
-Every count comes from `data/mycoast.json` alone, AFTER dedupe -- so run it
+Every count comes from `data/mycoast_data/mycoast.json` alone, AFTER dedupe -- so run it
 last (`./scraping/update_mycoast.sh` does). Reproduces the hand-made file of
 2026-09-24 field for field (checked against the 1,893-report snapshot it
 described), so the key set and meanings are unchanged:
@@ -27,7 +27,7 @@ from pathlib import Path
 from typing import Any
 
 PROJECT = Path(__file__).resolve().parent
-DEFAULT_INPUT = PROJECT / "data" / "mycoast.json"
+DEFAULT_INPUT = PROJECT / "data" / "mycoast_data" / "mycoast.json"
 DEFAULT_OUTPUT = PROJECT / "data" / "mycoast_meta_data.json"
 
 #: Reports whose local date is before this are timestamp errors (1935, ...),

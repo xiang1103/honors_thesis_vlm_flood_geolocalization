@@ -1,6 +1,6 @@
 """Draw the flood-coverage choropleth from the country pass.
 
-Reads `data/country_rows.csv` -- the flat (article, country) fact table --
+Reads `data/map_view/country_rows.csv` -- the flat (article, country) fact table --
 rather than the pre-aggregated totals, because every useful question about this
 map is a filter on those rows: one outlet's beat, one year, primary subjects
 only. Aggregation happens here, after filtering, so the counts always match
@@ -82,7 +82,7 @@ TICKS = [1, 3, 10, 30, 100, 300, 1000]
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Choropleth of flood coverage by country.")
-    parser.add_argument("--rows", type=Path, default=ROOT / "data" / "country_rows.csv")
+    parser.add_argument("--rows", type=Path, default=ROOT / "data" / "map_view" / "country_rows.csv")
     parser.add_argument("--output", type=Path, default=DEFAULT_OUTPUT,
                         help="Escape hatch. The default is a FIXED path, so every "
                              "run overwrites one file instead of littering.")
