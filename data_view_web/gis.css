@@ -282,3 +282,9 @@ button.depth-chip:hover { border-color: var(--blue); }
   .depth-shot-list { grid-template-columns: 1fr; }
 }
 @media (max-width: 560px) { .depth-filters { grid-template-columns: 1fr; } }
+
+/* Whole card opens the detail view (openOnCardClick in each page's script). */
+.card-clickable { cursor: pointer; transition: border-color 120ms ease; }
+.card-clickable:hover { border-color: var(--blue); }
+.image-card .card-body > .badges { margin-bottom: 8px; }
+.depth-card > .badges { margin-bottom: 6px; }

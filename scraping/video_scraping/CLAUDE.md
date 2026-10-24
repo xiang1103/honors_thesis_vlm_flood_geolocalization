@@ -444,9 +444,23 @@ stream (HTTP 403, https and HLS alike, yt-dlp 2026.10.21, no PO-token
 provider) while metadata still worked, so the probe passes but downloads
 fail. `scan_shots.py` now treats `STREAM_403_BLOCK` (5) stream 403s in a row as
 a block and exits 3, so the loop waits 2 h rather than failing through the
-whole list. Those 403s are logged as transient and retried. Whether to add a
-PO-token provider (e.g. bgutil-ytdlp-pot-provider) is the owner's call and
-has not been decided.
+whole list. Those 403s are logged as transient and retried.
+
+**PO-token provider installed (owner, 2026-10-24) -- it did NOT lift the 403.**
+`bgutil-ytdlp-pot-provider` 2.0.2, script mode on Deno (system Node is v18, it
+needs >= 22): the pip plugin in the conda env, plus the repo at
+`~/bgutil-ytdlp-pot-provider` (the plugin's default `server_home`; set up with
+`deno install --allow-scripts=npm:canvas --frozen` in `server/`). Nothing to
+keep running: yt-dlp spawns the script when a client needs a token (~7 s
+warm; the first cold run took 17 s, over the plugin's 15 s version check, so
+it can fail once after a long idle). yt-dlp's default clients (`tv`,
+`visionos`) ask for no token; forcing `player_client=mweb` makes it fetch one
+("Retrieved a gvs PO Token"), and the stream still answers 403 -- for
+"Me at the zoo" (jNQXAC9IVRw) too. So the block is on this server's IP
+(130.245.4.197), not a missing token. `youtube_download.py` keeps yt-dlp's
+default clients; the provider is there for when one needs a token. The
+nightly loop retries every 2 h, so the scan resumes on its own if the block
+lifts. Not tried: cookies (owner declined), another egress IP / proxy.
 
 **Shot prompt v2 (owner, 2026-10-15), used from the 751st video on:** real
 flooding seen from STREET LEVEL, surroundings visible, real (not

@@ -193,8 +193,26 @@ function shotTile(item, shot, index, videoIndex) {
   return tile;
 }
 
+/** The whole card opens the detail view; the title link and any button
+ *  inside keep their own action (the cover button already opens it). */
+function openOnCardClick(card, onOpen) {
+  card.classList.add("card-clickable");
+  card.addEventListener("click", (event) => {
+    if (event.target.closest("a, button")) return;
+    onOpen();
+  });
+}
+
+function locationBadge(location) {
+  const [label, cls] = LOCATION_BADGE[location] || LOCATION_BADGE.unknown;
+  const badges = node("div", "badges");
+  badges.append(node("span", `badge ${cls}`, label));
+  return badges;
+}
+
 function renderCard(item, videoIndex) {
   const card = node("article", "depth-card");
+  openOnCardClick(card, () => openViewer(videoIndex));
   const head = node("div", "depth-card-head");
   const heading = node("h2", "card-title");
   const link = node("a", "card-title-link", item.title);
@@ -204,10 +222,9 @@ function renderCard(item, videoIndex) {
   heading.append(link);
   const meta = node("p", "card-meta",
     [item.published ? `uploaded ${item.published.slice(0, 10)}` : "",
-      `${item.shots.length} flood shot${item.shots.length === 1 ? "" : "s"}`,
-      (LOCATION_BADGE[item.location] || LOCATION_BADGE.unknown)[0]].filter(Boolean).join(" · "));
+      `${item.shots.length} flood shot${item.shots.length === 1 ? "" : "s"}`].filter(Boolean).join(" · "));
   head.append(heading, meta);
-  card.append(head);
+  card.append(locationBadge(item.location), head);
 
   // the video's label per condition: its deepest shot (and the median)
   const labels = node("div", "depth-chips depth-video-labels");

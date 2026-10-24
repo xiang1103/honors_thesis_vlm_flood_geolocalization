@@ -140,11 +140,30 @@ function coverSurface(item, onOpen) {
   return button;
 }
 
+/** The whole card opens the detail view; the title link and any button
+ *  inside keep their own action (the cover button already opens it). */
+function openOnCardClick(card, onOpen) {
+  card.classList.add("card-clickable");
+  card.addEventListener("click", (event) => {
+    if (event.target.closest("a, button")) return;
+    onOpen();
+  });
+}
+
+function locationBadge(location) {
+  const [label, cls] = LOCATION_BADGE[location] || LOCATION_BADGE.unknown;
+  const badges = node("div", "badges");
+  badges.append(node("span", `badge ${cls}`, label));
+  return badges;
+}
+
 function renderCard(item, index) {
   const card = node("article", "image-card");
   card.append(coverSurface(item, () => openViewer(index)));
+  openOnCardClick(card, () => openViewer(index));
   const body = node("div", "card-body");
   body.append(timeline(item));
+  body.append(locationBadge(item.location));
   const heading = node("h2", "card-title");
   const link = node("a", "card-title-link", item.title);
   link.href = item.source_url;
@@ -154,8 +173,7 @@ function renderCard(item, index) {
   body.append(heading);
   body.append(node("p", "card-meta",
     [item.published ? `uploaded ${item.published.slice(0, 10)}` : "", clock(item.duration_s),
-      `${item.n_flood}/${item.n_shots} flood shots`, (LOCATION_BADGE[item.location] || LOCATION_BADGE.unknown)[0]]
-      .filter(Boolean).join(" · ")));
+      `${item.n_flood}/${item.n_shots} flood shots`].filter(Boolean).join(" · ")));
   card.append(body);
   return card;
 }

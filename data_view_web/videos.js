@@ -150,15 +150,34 @@ function externalLink(href, className, text) {
   return link;
 }
 
+/** The whole card opens the detail view; the title link and any button
+ *  inside keep their own action (the cover button already opens it). */
+function openOnCardClick(card, onOpen) {
+  card.classList.add("card-clickable");
+  card.addEventListener("click", (event) => {
+    if (event.target.closest("a, button")) return;
+    onOpen();
+  });
+}
+
+function locationBadge(location) {
+  const [label, cls] = LOCATION_BADGE[location] || LOCATION_BADGE.unknown;
+  const badges = node("div", "badges");
+  badges.append(node("span", `badge ${cls}`, label));
+  return badges;
+}
+
 function renderCard(item, index) {
   const card = node("article", "image-card");
   card.append(coverSurface(item, () => openViewer(index)));
+  openOnCardClick(card, () => openViewer(index));
   const body = node("div", "card-body");
+  body.append(locationBadge(item.location));
   const heading = node("h2", "card-title");
   heading.append(externalLink(item.source_url, "card-title-link", item.title));
   body.append(heading);
-  const meta = [item.published ? item.published.slice(0, 10) : "undated", formatDuration(item.duration_s),
-    LOCATION_BADGE[item.location][0]].filter(Boolean).join(" · ");
+  const meta = [item.published ? item.published.slice(0, 10) : "undated", formatDuration(item.duration_s)]
+    .filter(Boolean).join(" · ");
   body.append(node("p", "card-meta", meta));
   body.append(node("p", "caption", item.description || "No description."));
   card.append(body);

@@ -26,6 +26,17 @@ YouTube's player needs a JavaScript challenge solved (yt-dlp's EJS). The
 server's Node (18) is too old for it, so Deno (pip package `deno`, in the
 conda env's bin/) is used, passed by absolute path so this works under cron.
 
+Proxy (2026-10-24): YouTube refused every media stream to this server's IP
+(HTTP 403, with or without a PO token), so a proxy can be set in
+$YTDLP_PROXY or YTDLP_PROXY in .env (the environment wins), any URL yt-dlp's
+`proxy` option takes (http://user:pass@host:port, socks5://...). Each process
+tries DIRECT first; after the first video whose stream is refused there, it
+uses the proxy for the rest of the run. The whole yt-dlp run goes through it,
+not just the download: stream URLs carry the IP that extracted them. A new
+process (run_scan.sh restarts one after every block) tries direct again, so
+when the block lifts the proxy stops being used. `Video.via` says which route
+fetched each file. No proxy set = direct only, as before.
+
 Errors are raised as DownloadError subclasses with a reason, so a caller can
 tell "YouTube wants cookies" (bot check on this server's IP) from "video gone".
 
@@ -37,6 +48,7 @@ Downloading is against YouTube's Terms of Service; the owner accepted that
 from __future__ import annotations
 
 import contextlib
+import os
 import re
 import shutil
 import sys
@@ -57,6 +69,13 @@ MAX_DURATION_S = 300
 #: retries do not cover it, so the whole extraction is retried here.
 STREAM_403_ATTEMPTS = 3
 STREAM_403_WAIT_S = 5
+
+#: Where YTDLP_PROXY is read from when it is not in the environment.
+ENV_FILE = Path(__file__).resolve().parents[2] / ".env"
+
+#: Set once direct downloads are refused (403) in this process; from then on
+#: the proxy is used. Never reset: a new process tries direct again.
+_direct_refused = False
 
 #: Deno next to this interpreter (the conda env's bin/), found without PATH.
 DENO = Path(sys.executable).with_name("deno")
@@ -96,6 +115,7 @@ class Video:
     height: int | None
     fps: float | None
     format_id: str
+    via: str = "direct"         # "direct" or "proxy"
 
 
 def video_id_of(url_or_id: str) -> str:
@@ -105,7 +125,19 @@ def video_id_of(url_or_id: str) -> str:
     return m.group(1) or m.group(2)
 
 
-def _options(out_dir: Path) -> dict:
+def proxy_url(env_file: Path = ENV_FILE) -> str | None:
+    """$YTDLP_PROXY wins over .env (same rule as the YouTube API key)."""
+    if os.environ.get("YTDLP_PROXY"):
+        return os.environ["YTDLP_PROXY"]
+    if env_file.is_file():
+        for line in env_file.read_text(encoding="utf-8").splitlines():
+            key, sep, value = line.strip().removeprefix("export ").partition("=")
+            if sep and key.strip() == "YTDLP_PROXY":
+                return value.strip().strip("\"'") or None
+    return None
+
+
+def _options(out_dir: Path, proxy: str | None = None) -> dict:
     opts = {
         "format": FORMAT,
         "outtmpl": str(out_dir / "%(id)s.%(ext)s"),
@@ -116,6 +148,8 @@ def _options(out_dir: Path) -> dict:
         "retries": 3,
         "overwrites": True,
     }
+    if proxy:
+        opts["proxy"] = proxy
     if DENO.exists():
         opts["js_runtimes"] = {"deno": {"path": str(DENO)}}
     return opts
@@ -131,36 +165,56 @@ def _classify(exc: Exception) -> DownloadError:
     return DownloadError(text)
 
 
+def _fetch(url: str, vid: str, tmp: Path, max_duration_s: float | None, proxy: str | None) -> tuple[dict, float]:
+    """Extract and download into `tmp`; returns (info, duration)."""
+    import yt_dlp
+
+    for attempt in range(1, STREAM_403_ATTEMPTS + 1):
+        with yt_dlp.YoutubeDL(_options(tmp, proxy)) as ydl:
+            try:
+                info = ydl.extract_info(url, download=False)    # metadata only
+            except yt_dlp.utils.DownloadError as exc:
+                raise _classify(exc) from None
+            duration = float(info.get("duration") or 0)
+            if max_duration_s is not None and duration > max_duration_s:
+                raise TooLong(f"{vid} is {duration:.0f} s, over the {max_duration_s:.0f} s cap")
+            try:
+                return ydl.process_ie_result(info, download=True), duration
+            except yt_dlp.utils.DownloadError as exc:
+                if "HTTP Error 403" in str(exc) and attempt < STREAM_403_ATTEMPTS:
+                    print(f"  {vid}: stream refused (403), fresh URLs in {STREAM_403_WAIT_S} s "
+                          f"(attempt {attempt}/{STREAM_403_ATTEMPTS})", file=sys.stderr, flush=True)
+                    for leftover in tmp.iterdir():
+                        leftover.unlink()
+                    time.sleep(STREAM_403_WAIT_S)
+                    continue
+                raise _classify(exc) from None
+    raise AssertionError("unreachable")
+
+
 @contextlib.contextmanager
 def downloaded(url_or_id: str, max_duration_s: float | None = MAX_DURATION_S) -> Iterator[Video]:
     """Download into a fresh temporary directory; delete it when the block ends."""
-    import yt_dlp
+    global _direct_refused
 
     vid = video_id_of(url_or_id)
     url = f"https://www.youtube.com/watch?v={vid}"
+    proxy = proxy_url()
     tmp = Path(tempfile.mkdtemp(prefix=f"yt_{vid}_"))
     try:
-        for attempt in range(1, STREAM_403_ATTEMPTS + 1):
-            with yt_dlp.YoutubeDL(_options(tmp)) as ydl:
-                try:
-                    info = ydl.extract_info(url, download=False)    # metadata only
-                except yt_dlp.utils.DownloadError as exc:
-                    raise _classify(exc) from None
-                duration = float(info.get("duration") or 0)
-                if max_duration_s is not None and duration > max_duration_s:
-                    raise TooLong(f"{vid} is {duration:.0f} s, over the {max_duration_s:.0f} s cap")
-                try:
-                    info = ydl.process_ie_result(info, download=True)
-                    break
-                except yt_dlp.utils.DownloadError as exc:
-                    if "HTTP Error 403" in str(exc) and attempt < STREAM_403_ATTEMPTS:
-                        print(f"  {vid}: stream refused (403), fresh URLs in {STREAM_403_WAIT_S} s "
-                              f"(attempt {attempt}/{STREAM_403_ATTEMPTS})", file=sys.stderr, flush=True)
-                        for leftover in tmp.iterdir():
-                            leftover.unlink()
-                        time.sleep(STREAM_403_WAIT_S)
-                        continue
-                    raise _classify(exc) from None
+        via = "proxy" if proxy and _direct_refused else "direct"
+        try:
+            info, duration = _fetch(url, vid, tmp, max_duration_s, proxy if via == "proxy" else None)
+        except DownloadError as exc:
+            if not (via == "direct" and proxy and "HTTP Error 403" in str(exc)):
+                raise
+            _direct_refused = True
+            print(f"  {vid}: direct streams refused (403); using the proxy for the rest of this run",
+                  file=sys.stderr, flush=True)
+            for leftover in tmp.iterdir():
+                leftover.unlink()
+            via = "proxy"
+            info, duration = _fetch(url, vid, tmp, max_duration_s, proxy)
         files = [p for p in tmp.iterdir() if p.is_file() and not p.name.endswith(".part")]
         if len(files) != 1:
             raise DownloadError(f"expected one file in {tmp}, found {[p.name for p in files]}")
@@ -173,6 +227,7 @@ def downloaded(url_or_id: str, max_duration_s: float | None = MAX_DURATION_S) ->
             height=info.get("height"),
             fps=info.get("fps"),
             format_id=str(info.get("format_id") or ""),
+            via=via,
         )
     finally:
         shutil.rmtree(tmp, ignore_errors=True)
@@ -186,7 +241,7 @@ def main() -> int:
         size = video.path.stat().st_size
         print(f"{video.video_id}: {video.title!r}")
         print(f"  {video.duration_s:.0f} s, {video.width}x{video.height} @ {video.fps} fps, "
-              f"format {video.format_id}, {size / 1e6:.1f} MB at {video.path}")
+              f"format {video.format_id}, {size / 1e6:.1f} MB at {video.path}, via {video.via}")
         path = video.path
     print(f"  deleted: {not path.exists() and not path.parent.exists()}")
     return 0
