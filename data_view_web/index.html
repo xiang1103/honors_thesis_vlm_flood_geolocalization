@@ -46,16 +46,6 @@
             </select>
           </label>
           <label>
-            <span>Your decision</span>
-            <select id="reviewFilter">
-              <option value="all">All images</option>
-              <option value="unreviewed">Not reviewed yet</option>
-              <option value="useful">Useful</option>
-              <option value="reject">Rejected</option>
-              <option value="unsure">Unsure</option>
-            </select>
-          </label>
-          <label>
             <span>Sort</span>
             <select id="sortOrder">
               <option value="newest">Newest first</option>
@@ -63,14 +53,13 @@
               <option value="source">Source A–Z</option>
             </select>
           </label>
-          <button class="secondary" id="exportReviews" type="button">Export decisions</button>
         </div>
       </section>
 
       <section class="results-heading" aria-live="polite">
         <div>
           <p id="resultCount">Loading images…</p>
-          <p class="browser-note">Images load from the original source URLs in your browser; they are not downloaded by this site. Decisions are saved in this browser only.</p>
+          <p class="browser-note">Images load from the original source URLs in your browser; they are not downloaded by this site.</p>
         </div>
         <span id="pageStatus"></span>
       </section>
@@ -107,10 +96,6 @@
           <div id="viewerBadges" class="badges"></div>
           <h2 id="viewerTitle"></h2>
           <p id="viewerText" class="viewer-caption"></p>
-          <section class="review-panel">
-            <span>Your decision <small>keys 1 · 2 · 3</small></span>
-            <div id="viewerReview"></div>
-          </section>
           <dl id="viewerMetadata"></dl>
           <div class="viewer-links">
             <a id="viewerSourceLink" target="_blank" rel="noopener noreferrer">Open source page ↗</a>

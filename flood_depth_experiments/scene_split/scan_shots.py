@@ -110,6 +110,11 @@ DOWNLOAD_GAP_S = 10.0         # mean pause between downloads, randomised 0.5x-1.
 FRAME_WIDTH = 320             # saved review frames
 EXIT_BOT_CHECK = 3            # exit code when YouTube asks to confirm we are not a bot
 PROBE_TRIES = 10              # --probe: skip up to this many gone/too-long videos
+#: Stream 403s in a row that count as a block, like the bot check (exit 3).
+#: Seen 2026-10-24: metadata (and so --probe) still worked, but every stream --
+#: https and HLS, yt-dlp 2026.10.21 with no PO-token provider -- was refused, and
+#: the scan would otherwise spend ~25 s per video failing through the whole list.
+STREAM_403_BLOCK = 5
 
 #: Per-shot AI question (owner, 2026-10-15). Asked the OTHER way round --
 #: "is this real camera footage?", answer "no" = AI -- because asked "is this
@@ -281,6 +286,7 @@ def producer(todo: list[str], out: queue.Queue, stop: threading.Event, max_durat
              gap_s: float) -> None:
     import random
     last = 0.0
+    refused = 0                 # stream 403s in a row
     for vid in todo:
         if stop.is_set():
             break
@@ -297,7 +303,11 @@ def producer(todo: list[str], out: queue.Queue, stop: threading.Event, max_durat
             item = {"video_id": vid, "error": f"{type(exc).__name__}: {exc}", "error_kind": "permanent"}
         except Exception as exc:  # noqa: BLE001 -- one bad video must not end the scan
             item = {"video_id": vid, "error": f"{type(exc).__name__}: {exc}"[:500], "error_kind": "transient"}
+        refused = refused + 1 if "HTTP Error 403" in item.get("error", "") else 0
         out.put(item)
+        if refused >= STREAM_403_BLOCK:
+            out.put({"video_id": vid, "fatal": f"{refused} stream 403s in a row, treating as a block"})
+            break
     out.put(None)
 
 
@@ -412,7 +422,7 @@ def main() -> int:
                       f"{item['meta']['duration_s']:.0f} s), AI {ai_share} -> {ai_video} -- {3600 * rate:.0f} videos/h", flush=True)
             fh.write(json.dumps(row, ensure_ascii=False) + "\n")
             fh.flush()
-    print(f"=== {'stopped by bot check' if blocked else 'done'}: {n} videos, {shots_total} shots, "
+    print(f"=== {'stopped by a YouTube block' if blocked else 'done'}: {n} videos, {shots_total} shots, "
           f"{flood_total} flood shots", flush=True)
     return EXIT_BOT_CHECK if blocked else 0
 

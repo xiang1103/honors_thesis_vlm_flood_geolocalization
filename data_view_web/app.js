@@ -2,33 +2,16 @@
 
 const PAGE_SIZE = 24;
 
-// Decisions live ONLY in this browser -- there is no server-side copy -- so the
-// payload records the id scheme it was saved under, and a mismatch with what
-// the server emits is shown as a banner rather than as an empty review list.
-// A different port is a different origin, so this never meets the news site's
-// storage; the distinct key is for clarity, not isolation.
-const STORAGE_KEY = "vlm-flood-gis-reviews-v1";
-const EXPECTED_SCHEME = "gis_review_v1";
-
-const REVIEW_CHOICES = [
-  ["useful", "1 · Useful"],
-  ["reject", "2 · Reject"],
-  ["unsure", "3 · Unsure"],
-];
-
 const LOCATION_BADGE = {
   nyc: ["NYC", "nyc"],
   ny: ["NY STATE", "ny"],
   unknown: ["NYC UNKNOWN", "unknown"],
 };
 
-let storedScheme = null;
-
 const state = {
   items: [],
   filtered: [],
   summary: null,
-  reviews: loadReviews(),
   page: 1,
   viewerIndex: -1,
 };
@@ -38,9 +21,7 @@ const ui = {
   source: document.querySelector("#source"),
   event: document.querySelector("#event"),
   location: document.querySelector("#location"),
-  reviewFilter: document.querySelector("#reviewFilter"),
   sortOrder: document.querySelector("#sortOrder"),
-  exportReviews: document.querySelector("#exportReviews"),
   resultCount: document.querySelector("#resultCount"),
   pageStatus: document.querySelector("#pageStatus"),
   paginationStatus: document.querySelector("#paginationStatus"),
@@ -56,7 +37,6 @@ const ui = {
   viewerBadges: document.querySelector("#viewerBadges"),
   viewerTitle: document.querySelector("#viewerTitle"),
   viewerText: document.querySelector("#viewerText"),
-  viewerReview: document.querySelector("#viewerReview"),
   viewerMetadata: document.querySelector("#viewerMetadata"),
   viewerSourceLink: document.querySelector("#viewerSourceLink"),
   viewerImageLink: document.querySelector("#viewerImageLink"),
@@ -73,56 +53,6 @@ function node(tag, className = "", text = "") {
   return element;
 }
 
-// -- stored decisions -------------------------------------------------------
-
-function loadReviews() {
-  try {
-    const raw = JSON.parse(localStorage.getItem(STORAGE_KEY) || "null");
-    if (!raw || typeof raw !== "object") return {};
-    storedScheme = typeof raw.scheme === "string" ? raw.scheme : null;
-    return raw.reviews && typeof raw.reviews === "object" ? raw.reviews : {};
-  } catch {
-    return {};
-  }
-}
-
-function saveReviews() {
-  localStorage.setItem(STORAGE_KEY, JSON.stringify({ scheme: EXPECTED_SCHEME, reviews: state.reviews }));
-}
-
-function showNotice(text, tone = "info") {
-  document.querySelector("main").prepend(node("p", `storage-notice storage-notice-${tone}`, text));
-}
-
-function setReview(item, value) {
-  if (state.reviews[item.id] === value) delete state.reviews[item.id];
-  else state.reviews[item.id] = value;
-  saveReviews();
-  renderSummary();
-  // Re-filtering here would pull a just-reviewed card out from under the
-  // cursor when "Not reviewed yet" is selected; the grid re-renders in place
-  // and the filter applies on the next page change or filter change.
-  renderGrid({ refilter: false });
-  if (ui.viewer.open) renderViewerReview();
-}
-
-function reviewButtons(item, compact = false) {
-  const container = node("div", "review-buttons");
-  for (const [value, label] of REVIEW_CHOICES) {
-    const button = node("button", "", compact ? label.split(" · ")[1] : label);
-    button.type = "button";
-    button.dataset.value = value;
-    button.setAttribute("aria-pressed", String(state.reviews[item.id] === value));
-    button.addEventListener("click", (event) => {
-      event.stopPropagation();
-      event.preventDefault();
-      setReview(item, value);
-    });
-    container.append(button);
-  }
-  return container;
-}
-
 // -- cards ------------------------------------------------------------------
 
 function addBadge(parent, text, className = "") {
@@ -135,8 +65,6 @@ function badgesFor(item) {
   const [label, cls] = LOCATION_BADGE[item.location];
   addBadge(badges, label, cls);
   if (item.nyc_basis === "category") addBadge(badges, "NYC from category", "warning");
-  const decision = state.reviews[item.id];
-  if (decision) addBadge(badges, `review: ${decision}`, `review-${decision}`);
   return badges;
 }
 
@@ -183,27 +111,25 @@ function externalLink(href, className, text) {
   const link = node("a", className, text);
   link.href = href;
   link.target = "_blank";
-  // noopener: the opened tab must not get a handle on this page, which holds
-  // the decisions. noreferrer: the source never sees a localhost referrer.
+  // noopener: the opened tab gets no handle on this page. noreferrer: the
+  // source never sees this site as a referrer.
   link.rel = "noopener noreferrer";
   return link;
 }
 
 function renderCard(item, index) {
   const card = node("article", "image-card");
-  if (state.reviews[item.id]) card.classList.add(`reviewed-${state.reviews[item.id]}`);
   card.append(imageSurface(item, () => openViewer(index)));
   const body = node("div", "card-body");
-  body.append(badgesFor(item));
   const heading = node("h2", "card-title");
   heading.append(item.source_url
     ? externalLink(item.source_url, "card-title-link", item.title)
     : document.createTextNode(item.title));
   body.append(heading);
-  const meta = [item.date ? item.date.slice(0, 10) : "undated", item.event_label].filter(Boolean).join(" · ");
+  const meta = [item.date ? item.date.slice(0, 10) : "undated", item.event_label, LOCATION_BADGE[item.location][0]]
+    .filter(Boolean).join(" · ");
   body.append(node("p", "card-meta", meta));
   body.append(node("p", "caption", item.text || "No description available."));
-  body.append(reviewButtons(item, true));
   card.append(body);
   return card;
 }
@@ -214,13 +140,6 @@ function matchesLocation(item, mode) {
   if (mode === "all") return true;
   if (mode === "coords") return item.lat !== null && item.lat !== undefined;
   return item.location === mode;
-}
-
-function matchesReview(item, mode) {
-  const decision = state.reviews[item.id];
-  if (mode === "all") return true;
-  if (mode === "unreviewed") return !decision;
-  return decision === mode;
 }
 
 function sortItems(items) {
@@ -236,8 +155,7 @@ function filteredItems() {
   const matches = state.items.filter((item) => {
     if (ui.source.value !== "all" && item.source !== ui.source.value) return false;
     if (ui.event.value !== "all" && (item.event_label || "(none)") !== ui.event.value) return false;
-    if (!matchesLocation(item, ui.location.value)) return false;
-    return matchesReview(item, ui.reviewFilter.value);
+    return matchesLocation(item, ui.location.value);
   });
   return sortItems(matches);
 }
@@ -268,16 +186,14 @@ function populateEvents() {
 function renderSummary() {
   const s = state.summary;
   if (!s) return;
-  const reviewed = state.items.filter((item) => state.reviews[item.id]).length;
   ui.summary.textContent =
     `${s.images.toLocaleString()} flood photos from ${s.sources.length} sources: `
     + `${s.nyc.toLocaleString()} in NYC, ${s.ny_not_nyc.toLocaleString()} elsewhere in New York State, `
-    + `${s.location_unknown.toLocaleString()} without coordinates. `
-    + `${reviewed.toLocaleString()} reviewed in this browser.`;
+    + `${s.location_unknown.toLocaleString()} without coordinates.`;
 }
 
-function renderGrid({ refilter = true } = {}) {
-  if (refilter) state.filtered = filteredItems();
+function renderGrid() {
+  state.filtered = filteredItems();
   const pageCount = Math.max(1, Math.ceil(state.filtered.length / PAGE_SIZE));
   state.page = Math.min(state.page, pageCount);
   const start = (state.page - 1) * PAGE_SIZE;
@@ -306,13 +222,6 @@ function openViewer(index) {
   ui.viewer.showModal();
 }
 
-function renderViewerReview() {
-  const item = state.filtered[state.viewerIndex];
-  if (!item) return;
-  ui.viewerReview.replaceChildren(reviewButtons(item));
-  ui.viewerBadges.replaceChildren(...badgesFor(item).childNodes);
-}
-
 function setLink(link, href) {
   link.hidden = !href;
   link.href = href || "#";
@@ -327,7 +236,7 @@ function renderViewer() {
   ui.viewerPosition.textContent = `${state.viewerIndex + 1} / ${state.filtered.length}`;
   ui.viewerTitle.textContent = item.title;
   ui.viewerText.textContent = item.text || "No description available.";
-  renderViewerReview();
+  ui.viewerBadges.replaceChildren(...badgesFor(item).childNodes);
 
   const hasCoords = item.lat !== null && item.lat !== undefined;
   const rows = [
@@ -364,33 +273,6 @@ function moveViewer(delta) {
   renderViewer();
 }
 
-function exportReviews() {
-  const selected = state.items
-    .filter((item) => state.reviews[item.id])
-    .map((item) => ({
-      review: state.reviews[item.id],
-      id: item.id,
-      id_scheme: EXPECTED_SCHEME,
-      record_id: item.record_id,
-      source: item.source,
-      title: item.title,
-      date: item.date,
-      event: item.event,
-      lat: item.lat,
-      lon: item.lon,
-      location: item.location,
-      image_url: item.image_url,
-      source_url: item.source_url,
-    }));
-  const blob = new Blob([JSON.stringify(selected, null, 2)], { type: "application/json" });
-  const url = URL.createObjectURL(blob);
-  const anchor = document.createElement("a");
-  anchor.href = url;
-  anchor.download = "gis_flood_review_decisions.json";
-  anchor.click();
-  URL.revokeObjectURL(url);
-}
-
 // -- wiring -----------------------------------------------------------------
 
 ui.source.addEventListener("change", () => {
@@ -398,7 +280,7 @@ ui.source.addEventListener("change", () => {
   state.page = 1;
   renderGrid();
 });
-for (const control of [ui.event, ui.location, ui.reviewFilter, ui.sortOrder]) {
+for (const control of [ui.event, ui.location, ui.sortOrder]) {
   control.addEventListener("change", () => {
     state.page = 1;
     renderGrid();
@@ -415,7 +297,6 @@ ui.nextPage.addEventListener("click", () => {
   renderGrid();
   window.scrollTo({ top: 0, behavior: "smooth" });
 });
-ui.exportReviews.addEventListener("click", exportReviews);
 ui.closeViewer.addEventListener("click", () => ui.viewer.close());
 ui.previousImage.addEventListener("click", () => moveViewer(-1));
 ui.nextImage.addEventListener("click", () => moveViewer(1));
@@ -426,14 +307,6 @@ document.addEventListener("keydown", (event) => {
   if (!ui.viewer.open) return;
   if (event.key === "ArrowLeft") moveViewer(-1);
   if (event.key === "ArrowRight") moveViewer(1);
-  const choice = REVIEW_CHOICES[["1", "2", "3"].indexOf(event.key)];
-  if (choice) {
-    const item = state.filtered[state.viewerIndex];
-    if (item) {
-      setReview(item, choice[0]);
-      renderViewer();
-    }
-  }
 });
 
 fetch("/api/images")
@@ -444,21 +317,6 @@ fetch("/api/images")
   .then((catalog) => {
     state.items = catalog.items;
     state.summary = catalog.summary;
-
-    const serverScheme = catalog.review_id_scheme || null;
-    if (serverScheme && serverScheme !== EXPECTED_SCHEME) {
-      showNotice(
-        `Review id scheme mismatch: this page expects "${EXPECTED_SCHEME}" but the server emits `
-        + `"${serverScheme}". Saved decisions will not match until app.js and data_view_server.py agree.`,
-        "warn",
-      );
-    } else if (storedScheme && storedScheme !== EXPECTED_SCHEME) {
-      showNotice(
-        `Saved decisions use id scheme "${storedScheme}", but this page expects "${EXPECTED_SCHEME}". `
-        + "They are preserved in localStorage but are not being shown.",
-        "warn",
-      );
-    }
 
     for (const source of catalog.summary.sources) {
       const option = node("option", "", `${source.label} (${source.count.toLocaleString()})`);

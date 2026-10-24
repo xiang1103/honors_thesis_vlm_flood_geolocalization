@@ -407,6 +407,12 @@ not yet answered (new videos, earlier fetch failures), exits without loading the
 model when there are none, picks the GPU with the most free memory at run time
 (>= 60 GiB, else it skips the night), and has its own lock. Log appended to
 `scrape_data/logs/youtube-frames-cron.log`.
+The shot scan runs DAILY from cron too (installed 2026-10-24): 06:00,
+`flood_depth_experiments/scene_split/run_scan.sh` -- scans flood videos (<= 300 s) not yet in
+`scrape_data/youtube_shot_scan/`, waits out YouTube blocks, has its own lock. Log:
+`scrape_data/logs/shot-scan.log`. As of 2026-10-24 YouTube refuses every media
+stream (403) from this server, so it currently scans nothing; see "Nightly from
+cron" in `scraping/video_scraping/CLAUDE.md`.
 MyCoast update: `./scraping/update_mycoast.sh` (scrape -> dedupe -> metadata -> gis refresh,
 stops on first failure, log in `scrape_data/logs/mycoast-update_latest.log`).
 

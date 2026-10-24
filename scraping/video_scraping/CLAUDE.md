@@ -433,6 +433,21 @@ YouTube allows downloads again. Log: `scrape_data/logs/shot-scan.log`; a lock
 stops a second loop. Cookies from a signed-in account were NOT used (owner
 did not choose that; it risks the account).
 
+**Nightly from cron, and two stops fixed (2026-10-24).** The scan had sat idle
+since 2026-10-19: `--probe` tested only the first pending video, which had
+gone private, and an `Unavailable` there stopped the loop. The probe now skips
+gone videos (up to 10) and tests the next one; the scan itself records them as
+permanent errors and moves on. `run_scan.sh` now runs from cron at 06:00 (after
+the 05:00 visual check); the lock makes a run that is still going (or waiting
+out a block) end the new one. Also new that day: YouTube refused every media
+stream (HTTP 403, https and HLS alike, yt-dlp 2026.10.21, no PO-token
+provider) while metadata still worked, so the probe passes but downloads
+fail. `scan_shots.py` now treats `STREAM_403_BLOCK` (5) stream 403s in a row as
+a block and exits 3, so the loop waits 2 h rather than failing through the
+whole list. Those 403s are logged as transient and retried. Whether to add a
+PO-token provider (e.g. bgutil-ytdlp-pot-provider) is the owner's call and
+has not been decided.
+
 **Shot prompt v2 (owner, 2026-10-15), used from the 751st video on:** real
 flooding seen from STREET LEVEL, surroundings visible, real (not
 AI-generated / animated / rendered / game); no for maps, graphics, captions,
@@ -482,9 +497,9 @@ example AI images only).
 **Review page, 2026-10-15:** `data_view_server.py` :8768 `/shots.html` -- one
 card per scanned video with its shots on a timeline (flood / not flood /
 gap); the viewer lists every shot with the frames the model judged and its
-answers, plays any shot's range in the embed, and takes per-shot decisions
-(Flood / Not flood / Unsure, browser localStorage, exportable) to calibrate
-the shot rule. It re-reads the ledger when it changes. For it, the scan now
+answers, and plays any shot's range in the embed. (Per-shot decisions --
+Flood / Not flood / Unsure in localStorage -- existed until 2026-10-24 and
+were removed; the page is read-only.) It re-reads the ledger when it changes. For it, the scan now
 SAVES every sampled frame (320 px JPEG) in
 `scrape_data/youtube_shot_scan/frames/<video_id>/shot<k>_<j>.jpg` --
 stills, not video; gitignored, never published; `--no-frames` turns it off.
@@ -566,14 +581,13 @@ python3 scraping/video_scraping/youtube_scrape.py --no-search   # relabel / re-c
 
 **Viewing them:** `python3 data_view_server.py`, then the **Videos** tab
 (`http://127.0.0.1:8768/videos.html`; `data_view_web/videos.html` +
-`videos.js`). Cards show the cover, duration, flood score, location, title,
-date, tags and description; the detail view embeds YouTube's player
+`videos.js`). Cards show the cover, title, upload date, duration, location
+and description (no badges or tags since 2026-10-24); the detail view embeds YouTube's player
 (`youtube-nocookie.com`, the only frame the site's CSP allows) above the
-three automatic frames. Defaults to flood videos only (score >= the same
-`FLOOD_TEXT_THRESHOLD`); filters for location, review decision, sort and a
-text search. Decisions (useful / reject / unsure, keys 1-3) live in browser
-localStorage under their own key and id scheme (`youtube_review_v1`),
-separate from the photo page's. The server reads the JSON at start-up:
+three automatic frames, with the labels and tags. Defaults to flood videos only (score >= the same
+`FLOOD_TEXT_THRESHOLD`); filters for location, sort and a
+text search. Read-only: the review decisions (useful / reject / unsure)
+were removed 2026-10-24. The server reads the JSON at start-up:
 restart it to see a newer scrape. The player needs a referrer (YouTube error
 153 without one), so the iframe sets its own `referrerPolicy` while the rest
 of the site stays `no-referrer`.

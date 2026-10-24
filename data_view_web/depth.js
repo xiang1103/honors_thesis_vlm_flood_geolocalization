@@ -202,14 +202,11 @@ function renderCard(item, videoIndex) {
   link.target = "_blank";
   link.rel = "noopener noreferrer";
   heading.append(link);
-  const badges = node("div", "badges");
-  badges.append(node("span", "badge", `${item.shots.length} FLOOD SHOT${item.shots.length === 1 ? "" : "S"}`));
-  const [loc, cls] = LOCATION_BADGE[item.location] || LOCATION_BADGE.unknown;
-  badges.append(node("span", `badge ${cls}`, loc));
-  badges.append(node("span", `badge ${item.spread_cm > 30 ? "warning" : ""}`.trim(),
-    `CONDITIONS SPREAD ${Math.round(item.spread_cm)} CM`));
-  if (item.published) badges.append(node("span", "badge", `UPLOADED ${item.published.slice(0, 10)}`));
-  head.append(heading, badges);
+  const meta = node("p", "card-meta",
+    [item.published ? `uploaded ${item.published.slice(0, 10)}` : "",
+      `${item.shots.length} flood shot${item.shots.length === 1 ? "" : "s"}`,
+      (LOCATION_BADGE[item.location] || LOCATION_BADGE.unknown)[0]].filter(Boolean).join(" · "));
+  head.append(heading, meta);
   card.append(head);
 
   // the video's label per condition: its deepest shot (and the median)

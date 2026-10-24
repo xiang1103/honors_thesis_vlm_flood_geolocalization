@@ -35,6 +35,6 @@ while true; do
         echo "$(date -Is) scan_shots.py exited $rc (not a bot check); stopping"
         exit $rc
     fi
-    echo "$(date -Is) YouTube bot check; probing again in ${BLOCK_WAIT_S} s"
+    echo "$(date -Is) YouTube block (bot check, or stream 403s in a row); probing again in ${BLOCK_WAIT_S} s"
     sleep "$BLOCK_WAIT_S"
 done

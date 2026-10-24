@@ -8,17 +8,6 @@
 
 const PAGE_SIZE = 24;
 
-// Decisions are PER SHOT and live only in this browser. A shot's id is its
-// video and time range, so a shot the union rule later splits differently is
-// a different shot (its old decision is kept, just no longer shown).
-const STORAGE_KEY = "vlm-flood-shot-reviews-v1";
-const SHOT_CHOICES = [
-  // [stored value, label, styles.css value that colours the pressed button]
-  ["flood", "1 · Flood", "useful"],
-  ["not_flood", "2 · Not flood", "reject"],
-  ["unsure", "3 · Unsure", "unsure"],
-];
-
 const LOCATION_BADGE = {
   nyc: ["NYC", "nyc"],
   ny: ["NY STATE", "ny"],
@@ -30,7 +19,6 @@ const state = {
   items: [],
   filtered: [],
   summary: null,
-  reviews: loadReviews(),
   page: 1,
   viewerIndex: -1,
   activeShot: -1,
@@ -41,10 +29,8 @@ const ui = {
   summary: $("#summary"),
   floodFilter: $("#floodFilter"),
   location: $("#location"),
-  reviewFilter: $("#reviewFilter"),
   sortOrder: $("#sortOrder"),
   search: $("#search"),
-  exportReviews: $("#exportReviews"),
   resultCount: $("#resultCount"),
   pageStatus: $("#pageStatus"),
   paginationStatus: $("#paginationStatus"),
@@ -81,73 +67,9 @@ function clock(seconds) {
   return `${m}:${(seconds - 60 * m).toFixed(1).padStart(4, "0")}`;
 }
 
-function shotId(item, shot) {
-  return `${item.video_id}@${shot.start}-${shot.end}`;
-}
-
 function frameUrl(item, shotIndex, frameIndex) {
   // scan_shots.frame_path(): shot numbers from 1, three digits; frames from 0.
   return `/frames/${item.video_id}/shot${String(shotIndex + 1).padStart(3, "0")}_${frameIndex}.jpg`;
-}
-
-// -- stored decisions -------------------------------------------------------
-
-function loadReviews() {
-  try {
-    const raw = JSON.parse(localStorage.getItem(STORAGE_KEY) || "null");
-    return raw && raw.reviews && typeof raw.reviews === "object" ? raw.reviews : {};
-  } catch {
-    return {};
-  }
-}
-
-function saveReviews() {
-  try {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify({ scheme: "video_id@start-end", reviews: state.reviews }));
-  } catch {
-    showNotice("Could not save decisions in this browser (storage blocked).", "warn");
-  }
-}
-
-function showNotice(text, tone = "info") {
-  document.querySelector("main").prepend(node("p", `storage-notice storage-notice-${tone}`, text));
-}
-
-function reviewedCount(item) {
-  return item.shots.filter((shot) => state.reviews[shotId(item, shot)]).length;
-}
-
-function disagreements(item) {
-  return item.shots.filter((shot) => {
-    const decision = state.reviews[shotId(item, shot)];
-    return (decision === "flood" && !shot.flood) || (decision === "not_flood" && shot.flood);
-  }).length;
-}
-
-function setReview(item, shot, value) {
-  const id = shotId(item, shot);
-  if (state.reviews[id] === value) delete state.reviews[id];
-  else state.reviews[id] = value;
-  saveReviews();
-  renderSummary();
-  renderGrid({ refilter: false });
-  if (ui.viewer.open) renderShots();
-}
-
-function shotButtons(item, shot) {
-  const container = node("div", "review-buttons");
-  for (const [value, label, cssValue] of SHOT_CHOICES) {
-    const button = node("button", "", label.split(" · ")[1]);
-    button.type = "button";
-    button.dataset.value = cssValue;
-    button.setAttribute("aria-pressed", String(state.reviews[shotId(item, shot)] === value));
-    button.addEventListener("click", (event) => {
-      event.stopPropagation();
-      setReview(item, shot, value);
-    });
-    container.append(button);
-  }
-  return container;
 }
 
 // -- timeline ---------------------------------------------------------------
@@ -189,10 +111,6 @@ function badgesFor(item) {
   }
   const [label, cls] = LOCATION_BADGE[item.location] || LOCATION_BADGE.unknown;
   addBadge(badges, label, cls);
-  const reviewed = reviewedCount(item);
-  if (reviewed) addBadge(badges, `reviewed ${reviewed}/${item.n_shots}`, "review-useful");
-  const disagree = disagreements(item);
-  if (disagree) addBadge(badges, `${disagree} disagree`, "review-reject");
   return badges;
 }
 
@@ -227,7 +145,6 @@ function renderCard(item, index) {
   card.append(coverSurface(item, () => openViewer(index)));
   const body = node("div", "card-body");
   body.append(timeline(item));
-  body.append(badgesFor(item));
   const heading = node("h2", "card-title");
   const link = node("a", "card-title-link", item.title);
   link.href = item.source_url;
@@ -236,8 +153,9 @@ function renderCard(item, index) {
   heading.append(link);
   body.append(heading);
   body.append(node("p", "card-meta",
-    [item.published ? `uploaded ${item.published.slice(0, 10)}` : "", `scanned ${item.scanned_at.slice(0, 10)}`,
-      item.has_frames ? "" : "no saved frames"].filter(Boolean).join(" · ")));
+    [item.published ? `uploaded ${item.published.slice(0, 10)}` : "", clock(item.duration_s),
+      `${item.n_flood}/${item.n_shots} flood shots`, (LOCATION_BADGE[item.location] || LOCATION_BADGE.unknown)[0]]
+      .filter(Boolean).join(" · ")));
   card.append(body);
   return card;
 }
@@ -252,10 +170,6 @@ function matches(item, words) {
   if (flood === "ai" && item.ai_video !== true) return false;
   if (flood === "not_ai" && item.ai_video !== false) return false;
   if (ui.location.value !== "all" && item.location !== ui.location.value) return false;
-  const review = ui.reviewFilter.value;
-  if (review === "unreviewed" && reviewedCount(item)) return false;
-  if (review === "reviewed" && !reviewedCount(item)) return false;
-  if (review === "disagree" && !disagreements(item)) return false;
   if (words.length) {
     const haystack = item._search || (item._search =
       `${item.title}\n${(item.tags || []).join(" ")}\n${item.video_id}`.toLowerCase());
@@ -281,18 +195,16 @@ function filteredItems() {
 function renderSummary() {
   const s = state.summary;
   if (!s) return;
-  const reviewed = Object.keys(state.reviews).length;
   ui.summary.textContent =
     `${s.videos.toLocaleString()} videos scanned so far: ${s.shots.toLocaleString()} shots, `
     + `${s.flood_shots.toLocaleString()} judged flood (at least 2 of 3 frames). `
     + `${s.videos_with_flood.toLocaleString()} videos have at least one flood shot; `
     + `${s.flood_hours} of ${s.hours} hours of footage is in flood shots. `
-    + (s.ai_checked ? `${s.ai_videos.toLocaleString()} of ${s.ai_checked.toLocaleString()} AI-checked videos judged AI-generated. ` : "")
-    + `${reviewed.toLocaleString()} shots reviewed in this browser.`;
+    + (s.ai_checked ? `${s.ai_videos.toLocaleString()} of ${s.ai_checked.toLocaleString()} AI-checked videos judged AI-generated.` : "");
 }
 
-function renderGrid({ refilter = true } = {}) {
-  if (refilter) state.filtered = filteredItems();
+function renderGrid() {
+  state.filtered = filteredItems();
   const pageCount = Math.max(1, Math.ceil(state.filtered.length / PAGE_SIZE));
   state.page = Math.min(state.page, pageCount);
   const start = (state.page - 1) * PAGE_SIZE;
@@ -335,9 +247,7 @@ function playShot(index) {
 }
 
 function shotCard(item, shot, index) {
-  const decision = state.reviews[shotId(item, shot)];
   const card = node("article", `shot-card ${shot.flood ? "shot-flood" : "shot-dry"}`);
-  if (decision) card.classList.add(`reviewed-${SHOT_CHOICES.find((c) => c[0] === decision)[2]}`);
   card.dataset.index = index;
   if (index === state.activeShot) card.classList.add("is-active");
 
@@ -368,7 +278,7 @@ function shotCard(item, shot, index) {
     node("span", "", `${clock(shot.start)}–${clock(shot.end)} (${(shot.end - shot.start).toFixed(1)} s)`),
     node("span", `badge ${shot.flood ? "yes" : "no"}`, `${shot.flood ? "FLOOD" : "NOT FLOOD"} ${yes}/${shot.answers.length}`));
   if (shot.ai === "yes") head.append(node("span", "badge no", "AI"));
-  card.append(head, shotButtons(item, shot));
+  card.append(head);
   return card;
 }
 
@@ -423,31 +333,9 @@ function moveViewer(delta) {
   renderViewer();
 }
 
-function exportReviews() {
-  const rows = [];
-  for (const item of state.items) {
-    item.shots.forEach((shot, index) => {
-      const review = state.reviews[shotId(item, shot)];
-      if (!review) return;
-      rows.push({
-        review, video_id: item.video_id, shot: index + 1, start: shot.start, end: shot.end,
-        model_flood: shot.flood, model_answers: shot.answers, frame_times: shot.times,
-        title: item.title, source_url: item.source_url,
-      });
-    });
-  }
-  const blob = new Blob([JSON.stringify(rows, null, 2)], { type: "application/json" });
-  const url = URL.createObjectURL(blob);
-  const anchor = document.createElement("a");
-  anchor.href = url;
-  anchor.download = "youtube_shot_review_decisions.json";
-  anchor.click();
-  URL.revokeObjectURL(url);
-}
-
 // -- wiring -----------------------------------------------------------------
 
-for (const control of [ui.floodFilter, ui.location, ui.reviewFilter, ui.sortOrder]) {
+for (const control of [ui.floodFilter, ui.location, ui.sortOrder]) {
   control.addEventListener("change", () => {
     state.page = 1;
     renderGrid();
@@ -472,7 +360,6 @@ ui.nextPage.addEventListener("click", () => {
   window.scrollTo({ top: 0, behavior: "smooth" });
 });
 ui.shotFilter.addEventListener("change", renderShots);
-ui.exportReviews.addEventListener("click", exportReviews);
 ui.closeViewer.addEventListener("click", () => ui.viewer.close());
 ui.viewer.addEventListener("close", () => { ui.player.src = "about:blank"; });   // stops playback
 ui.previousVideo.addEventListener("click", () => moveViewer(-1));
@@ -484,9 +371,6 @@ document.addEventListener("keydown", (event) => {
   if (!ui.viewer.open || event.target instanceof HTMLSelectElement) return;
   if (event.key === "ArrowLeft") moveViewer(-1);
   if (event.key === "ArrowRight") moveViewer(1);
-  const choice = SHOT_CHOICES[["1", "2", "3"].indexOf(event.key)];
-  const item = state.filtered[state.viewerIndex];
-  if (choice && item && item.shots[state.activeShot]) setReview(item, item.shots[state.activeShot], choice[0]);
 });
 
 fetch("/api/shots")

@@ -49,15 +49,6 @@
             </select>
           </label>
           <label>
-            <span>Your decisions</span>
-            <select id="reviewFilter">
-              <option value="all">All videos</option>
-              <option value="unreviewed">No shot reviewed yet</option>
-              <option value="reviewed">Some shots reviewed</option>
-              <option value="disagree">You disagree with the model</option>
-            </select>
-          </label>
-          <label>
             <span>Sort</span>
             <select id="sortOrder">
               <option value="scanned">Most recently scanned</option>
@@ -71,7 +62,6 @@
             <span>Search</span>
             <input id="search" type="search" placeholder="title, tags, video id" autocomplete="off">
           </label>
-          <button class="secondary" id="exportReviews" type="button">Export decisions</button>
         </div>
       </section>
 
@@ -80,7 +70,7 @@
           <p id="resultCount">Loading videos…</p>
           <p class="browser-note">Timeline: <span class="key key-flood">flood shot</span>
             <span class="key key-dry">not flood</span> <span class="key key-gap">no shot (transition)</span>.
-            Frames are the scan's own stills; the player loads from YouTube. Decisions are saved in this browser only.</p>
+            Frames are the scan's own stills; the player loads from YouTube.</p>
         </div>
         <span id="pageStatus"></span>
       </section>
@@ -126,9 +116,7 @@
           <div id="viewerBadges" class="badges"></div>
           <h2 id="viewerTitle"></h2>
           <dl id="viewerMetadata"></dl>
-          <p class="shot-help">Click a shot to play exactly that range. Mark each shot
-            <b>1 · Flood</b>, <b>2 · Not flood</b> or <b>3 · Unsure</b> on the shot itself
-            (keys act on the last shot you played). ← → move between videos.</p>
+          <p class="shot-help">Click a shot to play exactly that range. ← → move between videos.</p>
           <div class="viewer-links">
             <a id="viewerSourceLink" target="_blank" rel="noopener noreferrer">Watch on YouTube ↗</a>
           </div>

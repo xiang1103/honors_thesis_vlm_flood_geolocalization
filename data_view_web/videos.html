@@ -47,16 +47,6 @@
             </select>
           </label>
           <label>
-            <span>Your decision</span>
-            <select id="reviewFilter">
-              <option value="all">All videos</option>
-              <option value="unreviewed">Not reviewed yet</option>
-              <option value="useful">Useful</option>
-              <option value="reject">Rejected</option>
-              <option value="unsure">Unsure</option>
-            </select>
-          </label>
-          <label>
             <span>Sort</span>
             <select id="sortOrder">
               <option value="newest">Newest upload first</option>
@@ -69,14 +59,13 @@
             <span>Search</span>
             <input id="search" type="search" placeholder="title, tags, description" autocomplete="off">
           </label>
-          <button class="secondary" id="exportReviews" type="button">Export decisions</button>
         </div>
       </section>
 
       <section class="results-heading" aria-live="polite">
         <div>
           <p id="resultCount">Loading videos…</p>
-          <p class="browser-note">Thumbnails and the player load from YouTube in your browser; no video is downloaded by this site. Decisions are saved in this browser only.</p>
+          <p class="browser-note">Thumbnails and the player load from YouTube in your browser; no video is downloaded by this site.</p>
         </div>
         <span id="pageStatus"></span>
       </section>
@@ -114,10 +103,6 @@
           <div id="viewerBadges" class="badges"></div>
           <h2 id="viewerTitle"></h2>
           <div id="viewerTags" class="tag-list"></div>
-          <section class="review-panel">
-            <span>Your decision <small>keys 1 · 2 · 3</small></span>
-            <div id="viewerReview"></div>
-          </section>
           <dl id="viewerMetadata"></dl>
           <p id="viewerDescription" class="viewer-caption"></p>
           <div class="viewer-links">
