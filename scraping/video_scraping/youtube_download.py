@@ -30,8 +30,8 @@ Proxy (2026-10-24): YouTube refused every media stream to this server's IP
 (HTTP 403, with or without a PO token), so a proxy can be set in
 $YTDLP_PROXY or YTDLP_PROXY in .env (the environment wins), any URL yt-dlp's
 `proxy` option takes (http://user:pass@host:port, socks5://...). Each process
-tries DIRECT first; after the first video whose stream is refused there, it
-uses the proxy for the rest of the run. The whole yt-dlp run goes through it,
+tries DIRECT first; after the first video refused there (stream 403, or
+the bot check -- both are per IP), it uses the proxy for the rest of the run. The whole yt-dlp run goes through it,
 not just the download: stream URLs carry the IP that extracted them. A new
 process (run_scan.sh restarts one after every block) tries direct again, so
 when the block lifts the proxy stops being used. `Video.via` says which route
@@ -206,10 +206,11 @@ def downloaded(url_or_id: str, max_duration_s: float | None = MAX_DURATION_S) ->
         try:
             info, duration = _fetch(url, vid, tmp, max_duration_s, proxy if via == "proxy" else None)
         except DownloadError as exc:
-            if not (via == "direct" and proxy and "HTTP Error 403" in str(exc)):
+            ip_block = isinstance(exc, NeedsCookies) or "HTTP Error 403" in str(exc)
+            if not (via == "direct" and proxy and ip_block):
                 raise
             _direct_refused = True
-            print(f"  {vid}: direct streams refused (403); using the proxy for the rest of this run",
+            print(f"  {vid}: direct route blocked ({type(exc).__name__}); using the proxy for the rest of this run",
                   file=sys.stderr, flush=True)
             for leftover in tmp.iterdir():
                 leftover.unlink()

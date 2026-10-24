@@ -27,7 +27,7 @@ yet"), in a pipeline:
     7. append one line per video to the ledger, flushed at once
     8. save every sampled frame as a small JPEG (FRAME_WIDTH px wide) in
        <ledger-dir>/frames/<video_id>/shot<k>_<j>.jpg, so the review page
-       (data_view_server.py, /shots.html) shows exactly what the model saw.
+       (data_view_server.py, /videos.html) shows exactly what the model saw.
        Stills, not video; gitignored, never published. --no-frames turns it off.
 
 Ledger: one JSONL file PER WORKER in scrape_data/youtube_shot_scan/
@@ -44,7 +44,7 @@ Videos are downloaded and deleted one at a time; no video file is kept
 faster; each loads its own copy of the VLM (~55 GB):
 
     python3 flood_depth_experiments/scene_split/scan_shots.py --only xtBb2eU9d2k i-U6LeACMnk   # test
-    python3 flood_depth_experiments/scene_split/scan_shots.py --probe      # is YouTube letting us download? (exit 0 / 3)
+    python3 flood_depth_experiments/scene_split/scan_shots.py --probe      # can we download? ~10 KB of a stream (exit 0 / 3)
     flood_depth_experiments/scene_split/run_scan.sh                        # ROUTINE: one slow worker, waits out bot checks
 
 Speed (owner, 2026-10-15): four workers at ~750 videos/h tripped YouTube's
@@ -244,7 +244,7 @@ def prepare(video_id: str, max_duration: float) -> dict:
             shots.append({"start": start, "end": end, "frames": frames})
         cap.release()
         meta = {"title": video.title, "duration_s": video.duration_s, "fps": fps,
-                "width": video.width, "height": video.height}
+                "width": video.width, "height": video.height, "download_via": video.via}
     # the video file is gone here
     return {"video_id": video_id, "meta": meta, "raw_shots": raw, "detect_s": timing, "shots": shots}
 
@@ -256,28 +256,41 @@ def frame_path(frames_dir: Path, video_id: str, shot: int, frame: int) -> Path:
 
 
 def probe(video_ids: list[str], tries: int = PROBE_TRIES) -> int:
-    """0 if YouTube hands out a video's formats, EXIT_BOT_CHECK if it asks for
-    a sign-in, 1 on anything else. Metadata only: nothing is downloaded.
+    """0 if YouTube lets us download, EXIT_BOT_CHECK if it is blocking this
+    server (the bot check, or the media stream refused with HTTP 403), 1 on
+    anything else. Downloads only the first ~10 KB of the stream (yt-dlp's
+    `test` mode) into a temporary folder that is removed at once -- checking
+    metadata alone is not enough: on 2026-10-24 metadata worked while every
+    stream was refused, so the scan loaded the VLM only to stop 5 videos later.
 
     A video that is gone (private, deleted) or too long says nothing about
     YouTube letting us in, so the probe moves on to the next id -- one video
     made private stopped the whole scan on 2026-10-19. The scan itself records
     such videos as permanent errors and skips them."""
     import yt_dlp
-    from youtube_download import _classify, _options
+    from youtube_download import FORMAT, _classify, _options, proxy_url
     import tempfile
+    proxy = proxy_url()
+    routes = [None, proxy] if proxy else [None]     # the scan falls back to the proxy too
     for video_id in video_ids[:tries]:
-        with tempfile.TemporaryDirectory() as tmp, yt_dlp.YoutubeDL(_options(Path(tmp))) as ydl:
-            try:
-                ydl.extract_info(f"https://www.youtube.com/watch?v={video_id}", download=False)
-            except yt_dlp.utils.DownloadError as exc:
-                err = _classify(exc)
-                print(f"probe {video_id}: {type(err).__name__}: {str(err)[:200]}", flush=True)
-                if isinstance(err, (Unavailable, TooLong)):
-                    continue
-                return EXIT_BOT_CHECK if isinstance(err, NeedsCookies) else 1
-        print(f"probe {video_id}: ok", flush=True)
-        return 0
+        for route in routes:
+            with tempfile.TemporaryDirectory() as tmp, \
+                    yt_dlp.YoutubeDL({**_options(Path(tmp), route), "test": True, "format": FORMAT}) as ydl:
+                via = "proxy" if route else "direct"
+                try:
+                    ydl.download([f"https://www.youtube.com/watch?v={video_id}"])
+                except yt_dlp.utils.DownloadError as exc:
+                    err = _classify(exc)
+                    print(f"probe {video_id} ({via}): {type(err).__name__}: {str(err)[:200]}", flush=True)
+                    if isinstance(err, (Unavailable, TooLong)):
+                        break                                   # this video, not the route: next id
+                    if isinstance(err, NeedsCookies) or "HTTP Error 403" in str(err):
+                        continue                                # this route is blocked: next route
+                    return 1
+            print(f"probe {video_id} ({via}): ok, stream downloadable", flush=True)
+            return 0
+        else:
+            return EXIT_BOT_CHECK                               # every route blocked
     print(f"probe: none of {min(tries, len(video_ids))} videos was available; giving up", flush=True)
     return 1
 
@@ -327,7 +340,7 @@ def main() -> int:
                     help="mean seconds between downloads (randomised 0.5x-1.5x; default %(default)s)")
     ap.add_argument("--no-frames", action="store_true", help="do not save the sampled frames for review")
     ap.add_argument("--probe", action="store_true",
-                    help=f"only check whether YouTube allows downloads (exit 0, or {EXIT_BOT_CHECK} on a bot check)")
+                    help=f"only check whether YouTube allows downloads, ~10 KB of one stream (exit 0, or {EXIT_BOT_CHECK} when blocked)")
     args = ap.parse_args()
     frames_dir = None if args.no_frames else args.ledger_dir / "frames"
 

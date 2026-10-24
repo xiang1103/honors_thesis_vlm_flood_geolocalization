@@ -18,7 +18,6 @@ const state = {
 
 const ui = {
   summary: document.querySelector("#summary"),
-  source: document.querySelector("#source"),
   event: document.querySelector("#event"),
   location: document.querySelector("#location"),
   sortOrder: document.querySelector("#sortOrder"),
@@ -164,39 +163,34 @@ function sortItems(items) {
   const order = ui.sortOrder.value;
   return items.sort((a, b) => {
     if (order === "oldest") return (a.date || "9999").localeCompare(b.date || "9999");
-    if (order === "source") return a.source_label.localeCompare(b.source_label) || b.date.localeCompare(a.date);
     return b.date.localeCompare(a.date);
   });
 }
 
 function filteredItems() {
   const matches = state.items.filter((item) => {
-    if (ui.source.value !== "all" && item.source !== ui.source.value) return false;
     if (ui.event.value !== "all" && (item.event_label || "(none)") !== ui.event.value) return false;
     return matchesLocation(item, ui.location.value);
   });
   return sortItems(matches);
 }
 
-/** Events depend on the chosen source: Commons alone has ~50 categories. */
+/** Report types, with counts, from the catalog's summary. */
 function populateEvents() {
-  const previous = ui.event.value;
   const counts = new Map();
-  const sources = ui.source.value === "all" ? Object.keys(state.summary.events) : [ui.source.value];
-  for (const source of sources) {
+  for (const source of Object.keys(state.summary.events)) {
     for (const [event, count] of state.summary.events[source] || []) {
       counts.set(event, (counts.get(event) || 0) + count);
     }
   }
   const options = [...counts.entries()].sort((a, b) => b[1] - a[1]);
-  ui.event.replaceChildren(node("option", "", "All events"));
+  ui.event.replaceChildren(node("option", "", "All report types"));
   ui.event.firstChild.value = "all";
   for (const [event, count] of options) {
     const option = node("option", "", `${event} (${count.toLocaleString()})`);
     option.value = event;
     ui.event.append(option);
   }
-  ui.event.value = counts.has(previous) ? previous : "all";
 }
 
 // -- rendering --------------------------------------------------------------
@@ -205,7 +199,7 @@ function renderSummary() {
   const s = state.summary;
   if (!s) return;
   ui.summary.textContent =
-    `${s.images.toLocaleString()} flood photos from ${s.sources.length} sources: `
+    `${s.images.toLocaleString()} flood photos from MyCoast citizen reports: `
     + `${s.nyc.toLocaleString()} in NYC, ${s.ny_not_nyc.toLocaleString()} elsewhere in New York State, `
     + `${s.location_unknown.toLocaleString()} without coordinates.`;
 }
@@ -293,11 +287,6 @@ function moveViewer(delta) {
 
 // -- wiring -----------------------------------------------------------------
 
-ui.source.addEventListener("change", () => {
-  populateEvents();
-  state.page = 1;
-  renderGrid();
-});
 for (const control of [ui.event, ui.location, ui.sortOrder]) {
   control.addEventListener("change", () => {
     state.page = 1;
@@ -336,11 +325,6 @@ fetch("/api/images")
     state.items = catalog.items;
     state.summary = catalog.summary;
 
-    for (const source of catalog.summary.sources) {
-      const option = node("option", "", `${source.label} (${source.count.toLocaleString()})`);
-      option.value = source.value;
-      ui.source.append(option);
-    }
     populateEvents();
     renderSummary();
     renderGrid();

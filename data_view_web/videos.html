@@ -3,38 +3,28 @@
   <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
-    <meta name="description" content="Local review interface for the YouTube flood-video dataset">
+    <meta name="description" content="YouTube flood videos split into shots, with the flood shots and the model's water-depth estimates">
     <meta name="color-scheme" content="dark">
-    <title>Flood video review</title>
+    <title>Flood videos</title>
     <link rel="stylesheet" href="/shared/styles.css">
     <link rel="stylesheet" href="gis.css">
   </head>
   <body>
     <header class="site-header">
       <nav class="site-nav" aria-label="Dataset pages">
-        <a href="/">Photos</a>
-        <a href="/videos.html" aria-current="page">Videos</a>
-        <a href="/shots.html">Shots</a>
-        <a href="/depth.html">Depth</a>
+        <a href="/">MyCoast photos</a>
+        <a href="/videos.html" aria-current="page">Flood videos</a>
       </nav>
       <div class="header-copy">
-        <p class="eyebrow">VLM flooding dataset · YouTube</p>
-        <h1>Video review</h1>
-        <p id="summary" class="lede" aria-live="polite">Loading catalog…</p>
+        <p class="eyebrow">VLM flooding dataset · YouTube · flood shots and water depth</p>
+        <h1>Flood videos</h1>
+        <p id="summary" class="lede" aria-live="polite">Loading videos…</p>
       </div>
     </header>
 
     <main>
       <section class="control-panel" aria-label="Video filters">
-        <div class="secondary-filters video-filters">
-          <label>
-            <span>Flood</span>
-            <select id="flood">
-              <option value="flood">Flood videos only</option>
-              <option value="all">All videos</option>
-              <option value="not">Not flood (fails text or frames)</option>
-            </select>
-          </label>
+        <div class="secondary-filters flood-video-filters">
           <label>
             <span>Location</span>
             <select id="location">
@@ -43,21 +33,28 @@
               <option value="ny">NY State outside NYC</option>
               <option value="outside">Outside New York</option>
               <option value="unknown">Location unknown</option>
-              <option value="coords">Has coordinates</option>
+            </select>
+          </label>
+          <label>
+            <span>Water depth</span>
+            <select id="depthFilter">
+              <option value="all">All videos</option>
+              <option value="with">With depth estimates</option>
+              <option value="without">Not estimated yet</option>
             </select>
           </label>
           <label>
             <span>Sort</span>
             <select id="sortOrder">
-              <option value="newest">Newest upload first</option>
-              <option value="oldest">Oldest upload first</option>
-              <option value="score">Flood score, high to low</option>
-              <option value="shortest">Shortest first</option>
+              <option value="newest">Newest upload</option>
+              <option value="deep">Deepest water (C5)</option>
+              <option value="flood_s">Most flood footage</option>
+              <option value="shots">Most flood shots</option>
             </select>
           </label>
           <label>
             <span>Search</span>
-            <input id="search" type="search" placeholder="title, tags, description" autocomplete="off">
+            <input id="search" type="search" placeholder="title or video id" autocomplete="off">
           </label>
         </div>
       </section>
@@ -65,15 +62,17 @@
       <section class="results-heading" aria-live="polite">
         <div>
           <p id="resultCount">Loading videos…</p>
-          <p class="browser-note">Thumbnails and the player load from YouTube in your browser; no video is downloaded by this site.</p>
+          <p class="browser-note">Timeline: <span class="key key-flood">flood shot</span>
+            <span class="key key-dry">not flood</span> <span class="key key-gap">no shot (transition)</span>.
+            Frames are the scan's own stills; the player loads from YouTube.</p>
         </div>
         <span id="pageStatus"></span>
       </section>
 
-      <section id="videoGrid" class="image-grid" aria-label="Dataset videos"></section>
+      <section id="videoGrid" class="image-grid" aria-label="Flood videos"></section>
       <section id="emptyState" class="empty-state" hidden>
         <h2>No videos match these filters</h2>
-        <p>Try another flood, location or search setting.</p>
+        <p>Try another filter or search.</p>
       </section>
 
       <nav class="pagination" aria-label="Results pages">
@@ -83,32 +82,46 @@
       </nav>
     </main>
 
-    <dialog id="viewer" class="viewer">
+    <dialog id="viewer" class="viewer shot-viewer">
       <button id="closeViewer" class="close-button" type="button" aria-label="Close video viewer">×</button>
       <div class="viewer-layout">
-        <div class="viewer-media video-media">
-          <div class="player-frame">
-            <iframe id="player" title="YouTube video player"
-                    allow="accelerometer; encrypted-media; gyroscope; picture-in-picture; fullscreen"
-                    ></iframe>
+        <div class="viewer-media shot-media">
+          <div class="shot-player">
+            <div class="player-frame">
+              <iframe id="player" title="YouTube video player"
+                      allow="accelerometer; autoplay; encrypted-media; gyroscope; picture-in-picture; fullscreen"></iframe>
+            </div>
+            <div id="viewerTimeline" class="timeline timeline-large" aria-label="Shots on the video's timeline"></div>
           </div>
-          <div id="viewerFrames" class="frame-strip" aria-label="YouTube's automatic frames"></div>
-          <div class="viewer-navigation">
-            <button id="previousVideo" type="button" aria-label="Previous matching video">←</button>
-            <span id="viewerPosition"></span>
-            <button id="nextVideo" type="button" aria-label="Next matching video">→</button>
+          <div class="shot-toolbar">
+            <label>
+              <span>Show</span>
+              <select id="shotFilter">
+                <option value="flood">Flood shots</option>
+                <option value="all">All shots</option>
+                <option value="dry">Not-flood shots</option>
+              </select>
+            </label>
+            <span id="shotCount"></span>
           </div>
+          <div id="shotList" class="shot-list"></div>
         </div>
         <article class="viewer-details">
           <div id="viewerBadges" class="badges"></div>
           <h2 id="viewerTitle"></h2>
-          <div id="viewerTags" class="tag-list"></div>
           <dl id="viewerMetadata"></dl>
+          <p class="shot-help">Click a shot to play exactly that range. ← → move between videos.</p>
+          <p class="shot-help">Water depth is the model's estimate for each flood shot under five inputs:
+            <b>C1</b> one frame · <b>C2</b> three frames · <b>C3</b> frame + uploader's text ·
+            <b>C4</b> frame + reference heights · <b>C5</b> frame + detected objects and heights.</p>
           <p id="viewerDescription" class="viewer-caption"></p>
           <div class="viewer-links">
             <a id="viewerSourceLink" target="_blank" rel="noopener noreferrer">Watch on YouTube ↗</a>
-            <a id="viewerMapLink" target="_blank" rel="noopener noreferrer">Map ↗</a>
-            <a id="viewerStreetViewLink" target="_blank" rel="noopener noreferrer">Street View ↗</a>
+          </div>
+          <div class="viewer-navigation">
+            <button id="previousVideo" type="button" aria-label="Previous matching video">←</button>
+            <span id="viewerPosition"></span>
+            <button id="nextVideo" type="button" aria-label="Next matching video">→</button>
           </div>
         </article>
       </div>

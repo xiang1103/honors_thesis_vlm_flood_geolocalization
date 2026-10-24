@@ -288,3 +288,7 @@ button.depth-chip:hover { border-color: var(--blue); }
 .card-clickable:hover { border-color: var(--blue); }
 .image-card .card-body > .badges { margin-bottom: 8px; }
 .depth-card > .badges { margin-bottom: 6px; }
+.flood-video-filters { grid-template-columns: repeat(3, minmax(140px, 1fr)) minmax(180px, 1.4fr); }
+@media (max-width: 800px) { .flood-video-filters { grid-template-columns: 1fr 1fr; } }
+@media (max-width: 560px) { .flood-video-filters { grid-template-columns: 1fr; } }
+.shot-card .depth-chips { margin: 8px 0 0; }

@@ -437,7 +437,7 @@ did not choose that; it risks the account).
 since 2026-10-19: `--probe` tested only the first pending video, which had
 gone private, and an `Unavailable` there stopped the loop. The probe now skips
 gone videos (up to 10) and tests the next one; the scan itself records them as
-permanent errors and moves on. `run_scan.sh` now runs from cron at 06:00 (after
+permanent errors and moves on. `run_scan.sh` now runs from cron, weekly on Sunday at 06:00 (owner, 2026-10-24; after
 the 05:00 visual check); the lock makes a run that is still going (or waiting
 out a block) end the new one. Also new that day: YouTube refused every media
 stream (HTTP 403, https and HLS alike, yt-dlp 2026.10.21, no PO-token
@@ -460,7 +460,25 @@ it can fail once after a long idle). yt-dlp's default clients (`tv`,
 (130.245.4.197), not a missing token. `youtube_download.py` keeps yt-dlp's
 default clients; the provider is there for when one needs a token. The
 nightly loop retries every 2 h, so the scan resumes on its own if the block
-lifts. Not tried: cookies (owner declined), another egress IP / proxy.
+lifts. Not tried: cookies (owner declined).
+
+**Proxy fallback (owner, 2026-10-24): proxy AND wait.** `YTDLP_PROXY` (env,
+else `.env`; template in `.env.example`) is any yt-dlp proxy URL. Each process
+downloads DIRECT first; the first video refused there (stream 403 after its 3
+tries, or the bot check -- both per IP) switches that process to the proxy
+for good (`_direct_refused` in `youtube_download.py`). The whole yt-dlp run
+goes through the proxy, metadata included: stream URLs carry the extracting
+IP (`ip=`), so a direct extraction cannot be downloaded through a proxy. If
+the proxy is refused too, `STREAM_403_BLOCK` ends the scan (exit 3), the loop
+waits 2 h, and the next process starts direct again -- so once the block lifts
+the proxy is no longer used. `--probe` now downloads ~10 KB of a real stream (yt-dlp `test` mode), direct and
+then through the proxy if set, and exits 3 when every route is refused -- so
+while blocked, each 2-hourly retry costs ~4 s and never loads the VLM (before,
+a metadata-only probe passed, the VLM loaded, and 5 videos failed).
+Each ledger line records `download_via` (`direct` / `proxy`). Tested with a
+local CONNECT proxy: switch after the first video, every later request
+(youtube.com, manifest and stream hosts) through it. No proxy is configured
+yet; until one is, behaviour is direct only, as before.
 
 **Shot prompt v2 (owner, 2026-10-15), used from the 751st video on:** real
 flooding seen from STREET LEVEL, surroundings visible, real (not
@@ -508,7 +526,7 @@ example AI images only).
    those videos (from the flood-only file; the master keeps every video) in
    one pass -- not video by video during the scan.
 
-**Review page, 2026-10-15:** `data_view_server.py` :8768 `/shots.html` -- one
+**Review page, 2026-10-15** (merged into `/videos.html` 2026-10-24): `data_view_server.py` :8768 `/shots.html` -- one
 card per scanned video with its shots on a timeline (flood / not flood /
 gap); the viewer lists every shot with the frames the model judged and its
 answers, and plays any shot's range in the embed. (Per-shot decisions --
@@ -593,16 +611,19 @@ python3 scraping/video_scraping/youtube_scrape.py --plan        # searches + cos
 python3 scraping/video_scraping/youtube_scrape.py --no-search   # relabel / re-check only, ~60 units
 ```
 
-**Viewing them:** `python3 data_view_server.py`, then the **Videos** tab
+**Viewing them:** `python3 data_view_server.py`, then the **Flood videos** tab
 (`http://127.0.0.1:8768/videos.html`; `data_view_web/videos.html` +
-`videos.js`). Cards show the cover, title, upload date, duration, location
-and description (no badges or tags since 2026-10-24); the detail view embeds YouTube's player
-(`youtube-nocookie.com`, the only frame the site's CSP allows) above the
-three automatic frames, with the labels and tags. Defaults to flood videos only (score >= the same
-`FLOOD_TEXT_THRESHOLD`); filters for location, sort and a
-text search. Read-only: the review decisions (useful / reject / unsure)
-were removed 2026-10-24. The server reads the JSON at start-up:
-restart it to see a newer scrape. The player needs a referrer (YouTube error
+`videos.js`). Since 2026-10-24 it shows only VALID flood videos: scanned,
+at least one flood shot, not `ai_video: true` (`is_valid_flood()` in the
+server; unscanned videos are not shown). Cards: frame, timeline, location
+badge, title, upload date, duration, flood shots, deepest water (C5). The
+detail view embeds YouTube's player (`youtube-nocookie.com`, the only frame
+the site's CSP allows) above the shot list; each flood shot shows its
+frames and its depth answer under C1-C5. Read-only (the review decisions
+were removed 2026-10-24; the separate Shots and Depth pages were merged
+into this one the same day). The server reads youtube_videos.json at
+start-up -- restart it to see a newer scrape; the ledger and depth run are
+re-read when they change. The player needs a referrer (YouTube error
 153 without one), so the iframe sets its own `referrerPolicy` while the rest
 of the site stays `no-referrer`.
 

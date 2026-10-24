@@ -1,4 +1,5 @@
-"""The data behind the review site's /depth.html (data_view_server.py).
+"""The data behind data_view's depth answers (data_view_server.py, /videos.html;
+formerly its own /depth.html page, whose prompt viewer used meta() and query()).
 
 Joins a full run's per-video answers (video_labels.json), its detector boxes
 (refs_*.jsonl) and the uploader text, and describes each condition's prompt

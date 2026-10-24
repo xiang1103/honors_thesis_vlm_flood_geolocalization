@@ -1,39 +1,28 @@
 #!/usr/bin/env python3
-"""Serve data_view, the local hub for reviewing every dataset in the project.
+"""Serve data_view, the local hub for viewing the project's datasets. Two tabs:
 
-Its front page (/) is the GIS flood-photo browser (New York State), the news
-reviewer's sibling. Same look and the same three-way decision
-(useful / reject / unsure), but it reads ``data/gis_data/gis_flood_images.json``, written
-by ``scraping/api_based_scraping/gis_scrape.py``, and shows what that data has
-instead of news: source, event, coordinates and the NYC label.
+/            MyCoast photos: the MyCoast rows of ``data/gis_data/gis_flood_images.json``
+             (written by ``scraping/api_based_scraping/gis_scrape.py``; PHOTO_SOURCES).
+             Images are never downloaded by Python; the browser loads the remote
+             URLs directly, a thumbnail first, falling back to the original.
 
-Nothing here has been classified by a model yet, so every row is shown.
-
-Images are never downloaded by Python; the browser loads the remote URLs
-directly -- a small thumbnail where the source offers one (MyCoast, Commons),
-falling back to the original.
+/videos.html Flood videos: every scanned video with at least one flood shot that
+             was not judged AI-generated (is_valid_flood). Joins the shot scan's
+             ledger (``scrape_data/youtube_shot_scan/``, written by
+             ``flood_depth_experiments/scene_split/scan_shots.py``), the depth run
+             (``--depth``, default ``scrape_data/experiments/flood_depth/full_5cm``;
+             each flood shot's answer under conditions C1-C5) and
+             ``data/youtube_videos.json`` (title, date, location). Rebuilt when the
+             ledger or the run changes, so a reload shows newly scanned videos.
+             Frames are the scan's own small JPEGs, served from the ledger folder;
+             the player is YouTube's embed.
 
     python3 data_view_server.py              # http://127.0.0.1:8768
 
-A second page, /videos.html, browses the YouTube flood videos
-(``data/youtube_videos.json``, written by
-``scraping/video_scraping/youtube_scrape.py``): cover thumbnail, title, tags,
-description, labels, and the embedded player in the detail view. Videos are
-never downloaded either; the browser loads YouTube's thumbnails and player.
-
-A third page, /shots.html, shows the per-shot flood scan
-(``flood_depth_experiments/scene_split/scan_shots.py``): every scanned video, its shots on
-a timeline, the frames the model judged with its answers, and the player
-cued to any shot. It re-reads the scan's ledger (``scrape_data/youtube_shot_scan/``)
-whenever that changes, so a reload shows videos scanned since the server
-started. The frames are the scan's own small JPEGs, served from that folder.
-
-A fourth page, /depth.html, shows the flood water-depth benchmark
-(``flood_depth_experiments/flood_depth/``, a run_all.py output folder, default
-``scrape_data/experiments/flood_depth/full_5cm``): every video's shots with
-the answer of each input condition C1-C5, the exact prompt each condition was
-given (uploader text, height table), and the detector boxes drawn on the
-frame the way C5 saw them. Rebuilt when the run's files change.
+The site is read-only: the review decisions it once stored in the browser were
+removed 2026-10-24. The old Shots and Depth pages were merged into /videos.html
+the same day (the depth page's prompt viewer and detector boxes went with it;
+``flood_depth_experiments/flood_depth/depth_review.py`` still builds that data).
 """
 
 from __future__ import annotations
@@ -48,7 +37,7 @@ from collections import Counter
 from datetime import datetime, timezone
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
-from urllib.parse import parse_qs, quote, unquote, urlparse
+from urllib.parse import quote, unquote, urlparse
 
 
 PROJECT_DIR = Path(__file__).resolve().parent
@@ -57,6 +46,8 @@ DEFAULT_VIDEOS = PROJECT_DIR / "data" / "youtube_videos.json"
 DEFAULT_SHOTS = PROJECT_DIR / "scrape_data" / "youtube_shot_scan"
 DEFAULT_DEPTH = PROJECT_DIR / "scrape_data" / "experiments" / "flood_depth" / "full_5cm"
 DEPTH_CODE = PROJECT_DIR / "flood_depth_experiments" / "flood_depth"
+DEPTH_CONDS = ["C1", "C2", "C3", "C4", "C5"]
+DEPTH_KEY_FRAME = 1     # depth_review.KEY: the frame C1, C3, C4 and C5 were shown
 STATIC_DIR = PROJECT_DIR / "data_view_web"
 #: The news site's stylesheet, served as-is so the two sites cannot drift apart
 #: visually. GIS-only rules live in data_view_web/gis.css.
@@ -80,6 +71,10 @@ SOURCE_LABELS = {
     "wikimedia_commons": "Commons",
     "napsg_photomappers": "NAPSG",
 }
+
+#: The photo tab shows these sources only; the other rows of
+#: gis_flood_images.json (USGS STN, Commons, NAPSG) stay in the file.
+PHOTO_SOURCES = {"mycoast"}
 
 COMMONS_THUMB_WIDTH = 500   # Wikimedia serves only standard widths; 640 returns HTTP 400
 
@@ -151,6 +146,8 @@ def load_catalog(results_file: Path) -> dict:
         if not image_url:
             continue
         source = str(row.get("source") or "unknown")
+        if source not in PHOTO_SOURCES:
+            continue
         thumbnail = _safe_remote_url(row.get("thumbnail_url"))
         if source == "wikimedia_commons":
             thumbnail = commons_thumbnail(image_url)
@@ -390,70 +387,99 @@ def load_shot_catalog(shots_dir: Path, videos_by_id: dict[str, dict]) -> dict:
     }
 
 
-class ShotCatalog:
-    """Rebuilt only when the ledger files change, so a page reload during a
-    running scan shows the new videos without re-reading on every request."""
+def is_valid_flood(item: dict) -> bool:
+    """A video the site shows: at least one flood shot, and not judged
+    AI-generated (the depth benchmark's rule; ai_video None = scanned before
+    the AI check existed, kept)."""
+    return item["n_flood"] > 0 and item["ai_video"] is not True
 
-    def __init__(self, shots_dir: Path, video_catalog: dict):
+
+def depth_by_shot(depth_catalog: dict) -> tuple[dict, dict]:
+    """(video_id -> {shot number -> {cond: answer}}, video_id -> label) from a
+    depth run. C1 asked each frame on its own; its key-frame answer is the one
+    shown, as on the old depth page."""
+    shots: dict[str, dict[int, dict]] = {}
+    labels: dict[str, dict] = {}
+    for item in depth_catalog.get("items") or []:
+        per = shots.setdefault(item["video_id"], {})
+        for s in item["shots"]:
+            c1 = s.get("C1")
+            per[s["s"]] = {"C1": c1[DEPTH_KEY_FRAME] if isinstance(c1, list) and len(c1) > DEPTH_KEY_FRAME else c1,
+                           **{c: s.get(c) for c in DEPTH_CONDS[1:]}}
+        labels[item["video_id"]] = {c: item["label"][c].get("deepest") for c in DEPTH_CONDS}
+    return shots, labels
+
+
+def load_flood_video_catalog(shot_catalog: dict, depth_catalog: dict, videos_by_id: dict) -> dict:
+    """The Videos tab: one item per valid flood video (is_valid_flood), its
+    shots from the scan and, where the depth run covered a shot, that shot's
+    answer under each condition."""
+    depth_shots, depth_labels = depth_by_shot(depth_catalog)
+    items = []
+    for item in shot_catalog["items"]:
+        if not is_valid_flood(item):
+            continue
+        vid = item["video_id"]
+        per = depth_shots.get(vid, {})
+        shots = [{**shot, "depth": per.get(k + 1)} for k, shot in enumerate(item["shots"])]
+        items.append({**item, "shots": shots,
+                      "description": videos_by_id.get(vid, {}).get("description", ""),
+                      "depth_label": depth_labels.get(vid)})
+    items.sort(key=lambda i: i["published"] or "", reverse=True)
+    locations = Counter(i["location"] for i in items)
+    return {
+        "available": bool(items),
+        "source_dir": shot_catalog["source_dir"],
+        "depth": {"run_dir": depth_catalog.get("run_dir"), "model": (depth_catalog.get("run") or {}).get("model"),
+                  "conditions": DEPTH_CONDS},
+        "summary": {
+            "videos": len(items),
+            "scanned": shot_catalog["summary"]["videos"],
+            "flood_shots": sum(i["n_flood"] for i in items),
+            "flood_hours": round(sum(i["flood_s"] for i in items) / 3600, 2),
+            "with_depth": sum(1 for i in items if i["depth_label"]),
+            "nyc": locations["nyc"],
+            "ny_not_nyc": locations["ny"],
+            "outside_ny": locations["outside"],
+            "location_unknown": locations["unknown"],
+        },
+        "items": items,
+    }
+
+
+class FloodVideoCatalog:
+    """The Videos tab's payload, rebuilt only when the scan ledger or the
+    depth run changes, so a reload during a running scan shows new videos
+    without re-reading on every request."""
+
+    def __init__(self, shots_dir: Path, depth_dir: Path, video_catalog: dict):
+        import sys
+        sys.path.insert(0, str(DEPTH_CODE))
+        import depth_review
         self.shots_dir = shots_dir
+        self.depth_dir = depth_dir
+        self._depth = depth_review
         self.videos_by_id = {i["video_id"]: i for i in video_catalog["items"]}
         self._key = None
         self._payload = b""
         self._lock = threading.Lock()
 
     def payload(self) -> bytes:
-        key = tuple((p.name, p.stat().st_mtime_ns, p.stat().st_size)
-                    for p in sorted(self.shots_dir.glob("*.jsonl")))
+        watched = [*sorted(self.shots_dir.glob("*.jsonl")), *self._depth.watched_files(self.depth_dir)]
+        key = tuple((str(p), p.stat().st_mtime_ns, p.stat().st_size) for p in watched if p.exists())
         with self._lock:
             if key != self._key:
-                catalog = load_shot_catalog(self.shots_dir, self.videos_by_id)
-                self._payload = json.dumps(catalog, ensure_ascii=False).encode("utf-8")
+                shots = load_shot_catalog(self.shots_dir, self.videos_by_id)
+                depth = self._depth.load_depth_catalog(self.depth_dir)
+                catalog = load_flood_video_catalog(shots, depth, self.videos_by_id)
+                self._payload = json.dumps(catalog, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
                 self._key = key
             return self._payload
 
 
-class DepthCatalog:
-    """The depth page's data, rebuilt only when the run's files change (a
-    run still in progress rewrites video_labels.json as shards finish).
-    The page fetches the run's fixed parts once (meta) and then ONE page of
-    videos at a time -- the whole run is ~5 MB, a page ~40 KB."""
-
-    def __init__(self, run_dir: Path):
-        import sys
-        sys.path.insert(0, str(DEPTH_CODE))
-        import depth_review
-        self.run_dir = run_dir
-        self._review = depth_review
-        self._key = None
-        self._catalog: dict = {}
-        self._lock = threading.Lock()
-        # build in the background so the first page view does not wait for it
-        threading.Thread(target=self.catalog, daemon=True).start()
-
-    def catalog(self) -> dict:
-        key = tuple((p.name, p.stat().st_mtime_ns, p.stat().st_size)
-                    for p in self._review.watched_files(self.run_dir) if p.exists())
-        with self._lock:
-            if key != self._key:
-                self._catalog = self._review.load_depth_catalog(self.run_dir)
-                self._key = key
-            return self._catalog
-
-    def meta(self) -> bytes:
-        catalog = self.catalog()
-        body = self._review.meta(catalog) if catalog["available"] else catalog
-        return json.dumps(body, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
-
-    def page(self, query: str) -> bytes:
-        params = {k: v[-1] for k, v in parse_qs(query).items()}
-        body = self._review.query(self.catalog(), params)
-        return json.dumps(body, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
-
-
-def make_handler(catalog: dict, video_catalog: dict, shot_catalog: ShotCatalog, depth_catalog: DepthCatalog):
+def make_handler(catalog: dict, videos: FloodVideoCatalog):
     payload = json.dumps(catalog, ensure_ascii=False).encode("utf-8")
-    video_payload = json.dumps(video_catalog, ensure_ascii=False).encode("utf-8")
-    frames_dir = shot_catalog.shots_dir / "frames"
+    frames_dir = videos.shots_dir / "frames"
 
     class ReviewHandler(SimpleHTTPRequestHandler):
         def __init__(self, *args, **kwargs):
@@ -465,16 +491,7 @@ def make_handler(catalog: dict, video_catalog: dict, shot_catalog: ShotCatalog, 
                 self._send(payload, "application/json; charset=utf-8")
                 return
             if path == "/api/videos":
-                self._send(video_payload, "application/json; charset=utf-8")
-                return
-            if path == "/api/shots":
-                self._send(shot_catalog.payload(), "application/json; charset=utf-8")
-                return
-            if path == "/api/depth/meta":
-                self._send(depth_catalog.meta(), "application/json; charset=utf-8")
-                return
-            if path == "/api/depth":
-                self._send(depth_catalog.page(urlparse(self.path).query), "application/json; charset=utf-8")
+                self._send(videos.payload(), "application/json; charset=utf-8")
                 return
             if path.startswith("/frames/"):
                 parts = path.split("/")
@@ -520,11 +537,11 @@ def main() -> None:
     parser.add_argument("--port", type=int, default=8768)
     parser.add_argument("--results", type=Path, default=DEFAULT_RESULTS)
     parser.add_argument("--videos", type=Path, default=DEFAULT_VIDEOS,
-                        help="YouTube videos for /videos.html (optional; default %(default)s)")
+                        help="YouTube videos: titles, dates, locations (optional; default %(default)s)")
     parser.add_argument("--shots", type=Path, default=DEFAULT_SHOTS,
-                        help="shot-scan ledger folder for /shots.html (optional; default %(default)s)")
+                        help="shot-scan ledger folder (optional; default %(default)s)")
     parser.add_argument("--depth", type=Path, default=DEFAULT_DEPTH,
-                        help="flood-depth run folder for /depth.html (optional; default %(default)s)")
+                        help="flood-depth run folder (optional; default %(default)s)")
     args = parser.parse_args()
 
     if not args.results.is_file():
@@ -537,12 +554,10 @@ def main() -> None:
             parser.error(f"Missing web asset: {required}")
 
     catalog = load_catalog(args.results)
-    video_catalog = load_video_catalog(args.videos)
-    shot_catalog = ShotCatalog(args.shots, video_catalog)
+    videos = FloodVideoCatalog(args.shots, args.depth, load_video_catalog(args.videos))
     summary = catalog["summary"]
     try:
-        server = ThreadingHTTPServer((args.host, args.port), make_handler(catalog, video_catalog, shot_catalog,
-                                                                      DepthCatalog(args.depth)))
+        server = ThreadingHTTPServer((args.host, args.port), make_handler(catalog, videos))
     except OSError as exc:
         if exc.errno == errno.EADDRINUSE:
             parser.error(
@@ -550,20 +565,10 @@ def main() -> None:
                 f"on this machine. Re-run with --port <free port>."
             )
         raise
-    sources = ", ".join(f"{s['label']} {s['count']}" for s in summary["sources"])
-    print(
-        f"GIS image review: {summary['images']} images ({sources}; "
-        f"{summary['nyc']} NYC) at http://{args.host}:{args.port}",
-        flush=True,
-    )
-    if video_catalog["available"]:
-        vs = video_catalog["summary"]
-        print(f"Video review: {vs['videos']} videos ({vs['flood']} flood) at "
-              f"http://{args.host}:{args.port}/videos.html", flush=True)
-    else:
-        print(f"Video review: no {args.videos} yet; /videos.html will say so.", flush=True)
-    print(f"Shot scan review: http://{args.host}:{args.port}/shots.html (reads {args.shots})", flush=True)
-    print(f"Depth benchmark review: http://{args.host}:{args.port}/depth.html (reads {args.depth})", flush=True)
+    print(f"MyCoast photos: {summary['images']} images ({summary['nyc']} NYC) at "
+          f"http://{args.host}:{args.port}", flush=True)
+    print(f"Flood videos: http://{args.host}:{args.port}/videos.html "
+          f"(reads {args.shots} and {args.depth})", flush=True)
     print("Press Ctrl+C to stop.", flush=True)
     try:
         server.serve_forever()

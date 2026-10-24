@@ -312,10 +312,9 @@ local_vlm/        model mechanics      backend.py, download_model.py
 flood_depth_experiments/ scene_split/ (shot detection + per-shot flood scan),
                   flood_depth/ (water-depth benchmark, PLAN.md)
 image_review_web/  + image_review_server.py   news review site (human + model)  :8765
-data_view_web/    + data_view_server.py     GIS/MyCoast review site           :8768
-                                               + /videos.html: YouTube videos (videos.js)
-                                               + /shots.html: per-shot flood scan (shots.js)
-                                               + /depth.html: depth benchmark C1-C5, prompts + boxes (depth.js)
+data_view_web/    + data_view_server.py     data_view, read-only, two tabs    :8768
+                                               /: MyCoast photos (app.js)
+                                               /videos.html: valid flood videos -- shots + depth C1-C5 (videos.js)
 make_metadata.py  writes data/news/meta_data.json (news dataset snapshot)
 make_mycoast_metadata.py  writes data/mycoast_meta_data.json (MyCoast snapshot)
 make_youtube_metadata.py  writes data/youtube_videos_meta_data.json (called by youtube_scrape.py)
@@ -388,9 +387,9 @@ python3 make_youtube_metadata.py                                  # metadata alo
 
 # review sites
 python3 image_review_server.py          # :8765 news, human labels + model answers
-python3 data_view_server.py            # :8768 GIS/MyCoast, reads gis_flood_images.json;
-                                        # /videos.html reads data/youtube_videos.json (--videos)
-                                        # /depth.html reads a flood-depth run (--depth, default full_5cm)
+python3 data_view_server.py            # :8768 data_view: MyCoast rows of gis_flood_images.json;
+                                        # /videos.html joins the shot-scan ledger (--shots), a depth
+                                        # run (--depth, default full_5cm) and youtube_videos.json
 ```
 
 `data_view_server.py` and `map_countries.py --serve` both default to :8768;
@@ -407,14 +406,15 @@ not yet answered (new videos, earlier fetch failures), exits without loading the
 model when there are none, picks the GPU with the most free memory at run time
 (>= 60 GiB, else it skips the night), and has its own lock. Log appended to
 `scrape_data/logs/youtube-frames-cron.log`.
-The shot scan runs DAILY from cron too (installed 2026-10-24): 06:00,
+The shot scan runs WEEKLY from cron (installed 2026-10-24, weekly from the same day): Sunday 06:00,
 `flood_depth_experiments/scene_split/run_scan.sh` -- scans flood videos (<= 300 s) not yet in
 `scrape_data/youtube_shot_scan/`, waits out YouTube blocks, has its own lock. Log:
 `scrape_data/logs/shot-scan.log`. As of 2026-10-24 YouTube refuses every media
 stream (403) from this server's IP, even with the PO-token provider installed
 (`bgutil-ytdlp-pot-provider`, Deno script mode, repo at `~/bgutil-ytdlp-pot-provider`),
-so it currently scans nothing; see "Nightly from cron" and "PO-token provider" in
-`scraping/video_scraping/CLAUDE.md`.
+so it currently scans nothing. A proxy fallback exists (`YTDLP_PROXY` in `.env`,
+used only after the direct route is refused; unset as of 2026-10-24); see "Nightly
+from cron", "PO-token provider" and "Proxy fallback" in `scraping/video_scraping/CLAUDE.md`.
 MyCoast update: `./scraping/update_mycoast.sh` (scrape -> dedupe -> metadata -> gis refresh,
 stops on first failure, log in `scrape_data/logs/mycoast-update_latest.log`).
 

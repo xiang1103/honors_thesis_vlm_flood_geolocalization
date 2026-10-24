@@ -3,23 +3,21 @@
   <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
-    <meta name="description" content="Local review interface for the New York GIS flood-photo dataset">
+    <meta name="description" content="Citizen flood reports from MyCoast New York: street-level photos with coordinates and time">
     <meta name="color-scheme" content="dark">
-    <title>GIS flood photo review</title>
+    <title>MyCoast flood photos</title>
     <link rel="stylesheet" href="/shared/styles.css">
     <link rel="stylesheet" href="gis.css">
   </head>
   <body>
     <header class="site-header">
       <nav class="site-nav" aria-label="Dataset pages">
-        <a href="/" aria-current="page">Photos</a>
-        <a href="/videos.html">Videos</a>
-        <a href="/shots.html">Shots</a>
-        <a href="/depth.html">Depth</a>
+        <a href="/" aria-current="page">MyCoast photos</a>
+        <a href="/videos.html">Flood videos</a>
       </nav>
       <div class="header-copy">
-        <p class="eyebrow">VLM flooding dataset · New York GIS sources</p>
-        <h1>GIS photo review</h1>
+        <p class="eyebrow">VLM flooding dataset · MyCoast New York</p>
+        <h1>MyCoast flood photos</h1>
         <p id="summary" class="lede" aria-live="polite">Loading catalog…</p>
       </div>
     </header>
@@ -28,12 +26,8 @@
       <section class="control-panel" aria-label="Image filters">
         <div class="secondary-filters gis-filters">
           <label>
-            <span>Source</span>
-            <select id="source"><option value="all">All sources</option></select>
-          </label>
-          <label>
-            <span>Event / type</span>
-            <select id="event"><option value="all">All events</option></select>
+            <span>Report type</span>
+            <select id="event"><option value="all">All report types</option></select>
           </label>
           <label>
             <span>Location</span>
@@ -41,8 +35,6 @@
               <option value="all">All of New York State</option>
               <option value="nyc">NYC only (5 boroughs)</option>
               <option value="ny">NY State outside NYC</option>
-              <option value="unknown">NYC unknown (no coordinates)</option>
-              <option value="coords">Has coordinates</option>
             </select>
           </label>
           <label>
@@ -50,7 +42,6 @@
             <select id="sortOrder">
               <option value="newest">Newest first</option>
               <option value="oldest">Oldest first</option>
-              <option value="source">Source A–Z</option>
             </select>
           </label>
         </div>
@@ -67,7 +58,7 @@
       <section id="imageGrid" class="image-grid" aria-label="Dataset images"></section>
       <section id="emptyState" class="empty-state" hidden>
         <h2>No images match these filters</h2>
-        <p>Try another source, event or location.</p>
+        <p>Try another report type or location.</p>
       </section>
 
       <nav class="pagination" aria-label="Results pages">
