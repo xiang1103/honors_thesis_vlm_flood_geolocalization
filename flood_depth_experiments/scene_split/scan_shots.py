@@ -43,9 +43,9 @@ Videos are downloaded and deleted one at a time; no video file is kept
 (owner's rule, 2026-10-14). Run several shards on different GPUs to go
 faster; each loads its own copy of the VLM (~55 GB):
 
-    python3 experiments/scene_split/scan_shots.py --only xtBb2eU9d2k i-U6LeACMnk   # test
-    python3 experiments/scene_split/scan_shots.py --probe      # is YouTube letting us download? (exit 0 / 3)
-    experiments/scene_split/run_scan.sh                        # ROUTINE: one slow worker, waits out bot checks
+    python3 flood_depth_experiments/scene_split/scan_shots.py --only xtBb2eU9d2k i-U6LeACMnk   # test
+    python3 flood_depth_experiments/scene_split/scan_shots.py --probe      # is YouTube letting us download? (exit 0 / 3)
+    flood_depth_experiments/scene_split/run_scan.sh                        # ROUTINE: one slow worker, waits out bot checks
 
 Speed (owner, 2026-10-15): four workers at ~750 videos/h tripped YouTube's
 "confirm you're not a bot" check after ~1 h. Now ONE worker, a randomised
@@ -109,6 +109,7 @@ PASS_OF_3 = 2                 # flood shot: >= 2 of 3 frames say yes
 DOWNLOAD_GAP_S = 10.0         # mean pause between downloads, randomised 0.5x-1.5x
 FRAME_WIDTH = 320             # saved review frames
 EXIT_BOT_CHECK = 3            # exit code when YouTube asks to confirm we are not a bot
+PROBE_TRIES = 10              # --probe: skip up to this many gone/too-long videos
 
 #: Per-shot AI question (owner, 2026-10-15). Asked the OTHER way round --
 #: "is this real camera footage?", answer "no" = AI -- because asked "is this
@@ -249,21 +250,31 @@ def frame_path(frames_dir: Path, video_id: str, shot: int, frame: int) -> Path:
     return frames_dir / video_id / f"shot{shot + 1:03d}_{frame}.jpg"
 
 
-def probe(video_id: str) -> int:
-    """0 if YouTube hands out this video's formats, EXIT_BOT_CHECK if it asks
-    for a sign-in, 1 on anything else. Metadata only: nothing is downloaded."""
+def probe(video_ids: list[str], tries: int = PROBE_TRIES) -> int:
+    """0 if YouTube hands out a video's formats, EXIT_BOT_CHECK if it asks for
+    a sign-in, 1 on anything else. Metadata only: nothing is downloaded.
+
+    A video that is gone (private, deleted) or too long says nothing about
+    YouTube letting us in, so the probe moves on to the next id -- one video
+    made private stopped the whole scan on 2026-10-19. The scan itself records
+    such videos as permanent errors and skips them."""
     import yt_dlp
     from youtube_download import _classify, _options
     import tempfile
-    with tempfile.TemporaryDirectory() as tmp, yt_dlp.YoutubeDL(_options(Path(tmp))) as ydl:
-        try:
-            ydl.extract_info(f"https://www.youtube.com/watch?v={video_id}", download=False)
-        except yt_dlp.utils.DownloadError as exc:
-            err = _classify(exc)
-            print(f"probe {video_id}: {type(err).__name__}: {str(err)[:200]}", flush=True)
-            return EXIT_BOT_CHECK if isinstance(err, NeedsCookies) else 1
-    print(f"probe {video_id}: ok", flush=True)
-    return 0
+    for video_id in video_ids[:tries]:
+        with tempfile.TemporaryDirectory() as tmp, yt_dlp.YoutubeDL(_options(Path(tmp))) as ydl:
+            try:
+                ydl.extract_info(f"https://www.youtube.com/watch?v={video_id}", download=False)
+            except yt_dlp.utils.DownloadError as exc:
+                err = _classify(exc)
+                print(f"probe {video_id}: {type(err).__name__}: {str(err)[:200]}", flush=True)
+                if isinstance(err, (Unavailable, TooLong)):
+                    continue
+                return EXIT_BOT_CHECK if isinstance(err, NeedsCookies) else 1
+        print(f"probe {video_id}: ok", flush=True)
+        return 0
+    print(f"probe: none of {min(tries, len(video_ids))} videos was available; giving up", flush=True)
+    return 1
 
 
 def producer(todo: list[str], out: queue.Queue, stop: threading.Event, max_duration: float,
@@ -324,7 +335,7 @@ def main() -> int:
           f"({sum(1 for v in candidates if not needs_scan(done.get(v)))} of {len(candidates)} already done)",
           flush=True)
     if args.probe:
-        return probe(todo[0] if todo else candidates[0])
+        return probe(todo) if todo else 0
     if not todo:
         return 0
 

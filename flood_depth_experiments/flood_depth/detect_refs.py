@@ -14,8 +14,8 @@ resolution the detector or the VLM saw.
 Weights: /home/liu47/models/grounding-dino-base (IDEA-Research/grounding-dino-base,
 Apache-2.0), loaded with local_files_only.
 
-    python3 experiments/flood_depth/detect_refs.py                 # items.jsonl, freest GPU
-    python3 experiments/flood_depth/detect_refs.py --device cuda:3 --items other.jsonl
+    python3 flood_depth_experiments/flood_depth/detect_refs.py                 # items.jsonl, freest GPU
+    python3 flood_depth_experiments/flood_depth/detect_refs.py --device cuda:3 --items other.jsonl
 """
 from __future__ import annotations
 

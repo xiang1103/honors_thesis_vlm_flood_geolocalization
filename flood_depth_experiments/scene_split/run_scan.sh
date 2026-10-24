@@ -10,12 +10,12 @@
 # ledger, so nothing is repeated. Exits when the scan finishes (exit 0) or
 # fails for another reason.
 #
-#   setsid nohup experiments/scene_split/run_scan.sh > /dev/null 2>&1 &
+#   setsid nohup flood_depth_experiments/scene_split/run_scan.sh > /dev/null 2>&1 &
 #   tail -f scrape_data/logs/shot-scan.log
 set -u
 cd "$(dirname "$0")/../.."
 PY=/home/liu47/conda_envs/newEnv_local/bin/python3
-SCAN=experiments/scene_split/scan_shots.py
+SCAN=flood_depth_experiments/scene_split/scan_shots.py
 LOG=scrape_data/logs/shot-scan.log
 BLOCK_WAIT_S=${BLOCK_WAIT_S:-7200}
 mkdir -p scrape_data/logs

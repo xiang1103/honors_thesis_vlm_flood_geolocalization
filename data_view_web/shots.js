@@ -1,7 +1,7 @@
 "use strict";
 
 // The shot page of the data_view site: the per-shot flood scan
-// (experiments/scene_split/scan_shots.py) over /api/shots. One card per
+// (flood_depth_experiments/scene_split/scan_shots.py) over /api/shots. One card per
 // scanned video with its shots on a timeline; the viewer lists every shot
 // with the frames the model judged and its answers, and plays any shot's
 // range in YouTube's player. Same look and conventions as videos.js.
@@ -497,7 +497,7 @@ fetch("/api/shots")
   .then((catalog) => {
     if (!catalog.available) {
       throw new Error(`No scanned videos yet in ${catalog.source_dir}. `
-        + "Run experiments/scene_split/run_scan.sh, then reload.");
+        + "Run flood_depth_experiments/scene_split/run_scan.sh, then reload.");
     }
     state.items = catalog.items;
     state.summary = catalog.summary;

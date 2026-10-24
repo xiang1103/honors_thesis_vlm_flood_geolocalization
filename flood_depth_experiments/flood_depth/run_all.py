@@ -36,9 +36,9 @@ refs.jsonl are reused when their prompt / detector ids match.
 One file per shard (NFS: several writers on one file can interleave). Resume:
 a shot with a line in any answers_*.jsonl is skipped.
 
-    python3 experiments/flood_depth/run_all.py --plan                     # counts, no GPU
-    python3 experiments/flood_depth/run_all.py --shard 0/3 --device-map cuda:0
-    experiments/flood_depth/run_all.sh 0 2 3                              # one shard per GPU, detached
+    python3 flood_depth_experiments/flood_depth/run_all.py --plan                     # counts, no GPU
+    python3 flood_depth_experiments/flood_depth/run_all.py --shard 0/3 --device-map cuda:0
+    flood_depth_experiments/flood_depth/run_all.sh 0 2 3                              # one shard per GPU, detached
 """
 from __future__ import annotations
 

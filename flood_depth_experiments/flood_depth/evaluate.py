@@ -22,10 +22,10 @@ With legacy labels (items whose gold label is a level, L0-L5):
   - inter-annotator agreement when >= 2 annotators labelled the same items
     (the human ceiling for QWK)
 
-    python3 experiments/flood_depth/evaluate.py
-    python3 experiments/flood_depth/evaluate.py --split-scheme video_hash --split test
-    python3 experiments/flood_depth/evaluate.py --annotator alice      # one annotator as gold
-    python3 experiments/flood_depth/evaluate.py --full     # run_all.py's compact answers, every shot
+    python3 flood_depth_experiments/flood_depth/evaluate.py
+    python3 flood_depth_experiments/flood_depth/evaluate.py --split-scheme video_hash --split test
+    python3 flood_depth_experiments/flood_depth/evaluate.py --annotator alice      # one annotator as gold
+    python3 flood_depth_experiments/flood_depth/evaluate.py --full     # run_all.py's compact answers, every shot
 """
 from __future__ import annotations
 

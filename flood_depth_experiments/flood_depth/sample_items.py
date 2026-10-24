@@ -21,9 +21,9 @@ Video metadata (title, description, tags -- condition C3) is copied from
 data/youtube_videos.json into each item, so a run is reproducible even if the
 master changes.
 
-    python3 experiments/flood_depth/sample_items.py --stats            # pool size, writes nothing
-    python3 experiments/flood_depth/sample_items.py --n 300            # pilot -> items.jsonl
-    python3 experiments/flood_depth/sample_items.py --n 0 --out pool.jsonl   # every eligible shot
+    python3 flood_depth_experiments/flood_depth/sample_items.py --stats            # pool size, writes nothing
+    python3 flood_depth_experiments/flood_depth/sample_items.py --n 300            # pilot -> items.jsonl
+    python3 flood_depth_experiments/flood_depth/sample_items.py --n 0 --out pool.jsonl   # every eligible shot
 """
 from __future__ import annotations
 

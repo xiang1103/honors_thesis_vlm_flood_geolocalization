@@ -29,8 +29,8 @@ model nothing -- and writes <run dir>/video_labels.json:
 Works for both runs: cm intervals (full_5cm/) and L0-L5 levels (full/).
 run_all.py rebuilds it when a shard finishes; run it by hand any time:
 
-    python3 experiments/flood_depth/make_video_labels.py                          # full_5cm
-    python3 experiments/flood_depth/make_video_labels.py --dir scrape_data/experiments/flood_depth/full
+    python3 flood_depth_experiments/flood_depth/make_video_labels.py                          # full_5cm
+    python3 flood_depth_experiments/flood_depth/make_video_labels.py --dir scrape_data/experiments/flood_depth/full
 """
 from __future__ import annotations
 

@@ -33,7 +33,7 @@ example by eye. This script:
 The video file itself is never kept. The keyframes are small stills for
 looking at; delete the folder when done.
 
-    python3 experiments/scene_split/compare_shot_detectors.py https://www.youtube.com/watch?v=xtBb2eU9d2k
+    python3 flood_depth_experiments/scene_split/compare_shot_detectors.py https://www.youtube.com/watch?v=xtBb2eU9d2k
     python3 -m http.server 8790 --directory scrape_data/experiments/scene_split/xtBb2eU9d2k
     # then open http://127.0.0.1:8790/  (served over http so the YouTube player gets a referrer)
 """

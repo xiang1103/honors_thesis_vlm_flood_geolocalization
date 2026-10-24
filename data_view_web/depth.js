@@ -1,7 +1,7 @@
 "use strict";
 
 // The depth page of the data_view site: one full run of the water-depth
-// benchmark (experiments/flood_depth/run_all.py). The run's fixed parts come
+// benchmark (flood_depth_experiments/flood_depth/run_all.py). The run's fixed parts come
 // once from /api/depth/meta; videos come ONE PAGE at a time from /api/depth,
 // which filters, sorts and paginates on the server (depth_review.query) --
 // the whole run is ~5 MB, a page ~40 KB.
@@ -530,7 +530,7 @@ fetch("/api/depth/meta")
   .then((meta) => {
     if (!meta.available) {
       throw new Error(`No video_labels.json in ${meta.run_dir}. `
-        + "Run experiments/flood_depth/make_video_labels.py --dir <run folder>, then reload.");
+        + "Run flood_depth_experiments/flood_depth/make_video_labels.py --dir <run folder>, then reload.");
     }
     state.meta = meta;
     renderSummary();

@@ -14,9 +14,9 @@ C1 is asked of EVERY frame of the shot by default (--c1-frames all): the key
 frame's answer is the C1 score, the other two give the label-free
 within-shot consistency metric. --c1-frames key asks only the key frame.
 
-    python3 experiments/flood_depth/run_conditions.py                       # all conditions, freest GPU
-    python3 experiments/flood_depth/run_conditions.py --conditions C1,C2 --limit 20
-    python3 experiments/flood_depth/run_conditions.py --thinking            # reasoning on (slow; separate rows)
+    python3 flood_depth_experiments/flood_depth/run_conditions.py                       # all conditions, freest GPU
+    python3 flood_depth_experiments/flood_depth/run_conditions.py --conditions C1,C2 --limit 20
+    python3 flood_depth_experiments/flood_depth/run_conditions.py --thinking            # reasoning on (slow; separate rows)
 """
 from __future__ import annotations
 

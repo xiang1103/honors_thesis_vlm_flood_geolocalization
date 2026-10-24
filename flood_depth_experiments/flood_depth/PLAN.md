@@ -1,6 +1,6 @@
 # Flood water depth from street-level video — benchmark plan
 
-Started 2026-10-19. Code: `experiments/flood_depth/`. Outputs:
+Started 2026-10-19. Code: `flood_depth_experiments/flood_depth/`. Outputs:
 `scrape_data/experiments/flood_depth/` (gitignored, like `scene_split`). Nothing
 here writes to `data/`; promoting results into the published data needs the
 owner's decisions on schema (root `CLAUDE.md` contracts).
@@ -28,7 +28,7 @@ C4 and C5 test whether telling the model those references helps.
 ## Unit: one shot
 
 An **item** is one flood **shot** (a continuous camera take) from the shot
-scan (`experiments/scene_split/scan_shots.py`), id `<video_id>:shot<NNN>`.
+scan (`flood_depth_experiments/scene_split/scan_shots.py`), id `<video_id>:shot<NNN>`.
 Depth does not change inside one take, so a shot has ONE label and every
 condition is graded against it. A frame-level label would make conditions
 incomparable (C1 and C2 would be graded on different things).
@@ -217,12 +217,12 @@ Speed: ~3,400 questions/h per GPU, 7 questions per shot → ~7 h on 3 GPUs.
 
 ```bash
 conda activate /home/liu47/conda_envs/newEnv_local
-python3 experiments/flood_depth/sample_items.py --stats         # pool size
-python3 experiments/flood_depth/sample_items.py --n 300         # -> items.jsonl (refuses to overwrite)
-python3 experiments/flood_depth/detect_refs.py                  # C5 boxes, ~0.5 s/item
-python3 experiments/flood_depth/run_conditions.py               # C1-C5, freest GPU with 60 GiB
-python3 experiments/flood_depth/run_conditions.py --conditions C2 --limit 20
-python3 experiments/flood_depth/evaluate.py                     # -> results.json
+python3 flood_depth_experiments/flood_depth/sample_items.py --stats         # pool size
+python3 flood_depth_experiments/flood_depth/sample_items.py --n 300         # -> items.jsonl (refuses to overwrite)
+python3 flood_depth_experiments/flood_depth/detect_refs.py                  # C5 boxes, ~0.5 s/item
+python3 flood_depth_experiments/flood_depth/run_conditions.py               # C1-C5, freest GPU with 60 GiB
+python3 flood_depth_experiments/flood_depth/run_conditions.py --conditions C2 --limit 20
+python3 flood_depth_experiments/flood_depth/evaluate.py                     # -> results.json
 python3 data_view_server.py                                    # browse a full run: :8768/depth.html
 python3 data_view_server.py --depth scrape_data/experiments/flood_depth/full   # the L0-L5 run instead
 ```

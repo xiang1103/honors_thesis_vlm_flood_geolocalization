@@ -22,14 +22,14 @@ description, labels, and the embedded player in the detail view. Videos are
 never downloaded either; the browser loads YouTube's thumbnails and player.
 
 A third page, /shots.html, shows the per-shot flood scan
-(``experiments/scene_split/scan_shots.py``): every scanned video, its shots on
+(``flood_depth_experiments/scene_split/scan_shots.py``): every scanned video, its shots on
 a timeline, the frames the model judged with its answers, and the player
 cued to any shot. It re-reads the scan's ledger (``scrape_data/youtube_shot_scan/``)
 whenever that changes, so a reload shows videos scanned since the server
 started. The frames are the scan's own small JPEGs, served from that folder.
 
 A fourth page, /depth.html, shows the flood water-depth benchmark
-(``experiments/flood_depth/``, a run_all.py output folder, default
+(``flood_depth_experiments/flood_depth/``, a run_all.py output folder, default
 ``scrape_data/experiments/flood_depth/full_5cm``): every video's shots with
 the answer of each input condition C1-C5, the exact prompt each condition was
 given (uploader text, height table), and the detector boxes drawn on the

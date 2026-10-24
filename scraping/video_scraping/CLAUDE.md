@@ -271,12 +271,12 @@ AVA shape); the downloaded files exist only to produce the timestamps.
 
 ### Experiments (started 2026-10-14)
 
-`experiments/scene_split/` -- one example video at a time, methods compared by
+`flood_depth_experiments/scene_split/` -- one example video at a time, methods compared by
 eye before anything touches the scraped data. Downloader:
 `scraping/video_scraping/youtube_download.py` (`with downloaded(url) as v:`;
 720p video-only H.264, temp dir deleted on exit, duration cap; needs `yt-dlp`
 and `deno` in the conda env -- Node 18 is too old for yt-dlp's YouTube JS
-challenge). Script: `experiments/scene_split/compare_shot_detectors.py`. Outputs
+challenge). Script: `flood_depth_experiments/scene_split/compare_shot_detectors.py`. Outputs
 (results.json, index.html, small keyframes) go to
 `scrape_data/experiments/scene_split/<video_id>/`, gitignored; the video file
 is never kept.
@@ -314,7 +314,7 @@ let scene grouping re-merge the pieces.
 
 Run 2, **TransNetV2 added** (2026-10-14; PyTorch port `transnetv2-pytorch`,
 original weights, CPU, 25 s for the 191 s video vs ~6 s for PySceneDetect).
-The script is now `experiments/scene_split/compare_shot_detectors.py`
+The script is now `flood_depth_experiments/scene_split/compare_shot_detectors.py`
 (methods: content, adaptive, transnetv2). TransNetV2: 17 shots; agrees with
 content and adaptive on 13 cuts. It alone found **71.5 s: Metro-North train
 clip -> NWS rainfall-risk map** (content and adaptive both kept 48.8-83.8 s as
@@ -400,7 +400,7 @@ choice for the owner: keep them, or gap frames one model calls transition
 when they sit at a cut both found.
 
 **Per-shot flood check + full scan (owner's rule, 2026-10-15)** --
-`experiments/scene_split/scan_shots.py`. For each union shot, frames at 10% /
+`flood_depth_experiments/scene_split/scan_shots.py`. For each union shot, frames at 10% /
 50% / 90% of the shot (shots under 1 s: one middle frame), the frame-check
 question plus "Count only flooding in the scene itself, not in text, maps or
 graphics"; a shot is a flood shot if >= 2 of 3 frames say yes (1-frame
@@ -425,7 +425,7 @@ After ~1 h at ~750 videos/h (4 workers), YouTube answered every download with
 "Sign in to confirm you're not a bot" and all four workers stopped themselves
 (750 videos done, no failures: 7,543 shots, 4,314 flood; 698 videos with a
 flood shot; 9.3 of 14.0 h of footage in flood shots). The scan now runs
-through `experiments/scene_split/run_scan.sh`: one worker, a randomised
+through `flood_depth_experiments/scene_split/run_scan.sh`: one worker, a randomised
 `--gap` (mean 10 s) between downloads (~180 videos/h); on a bot check
 `scan_shots.py` exits 3 and frees its GPU, and the loop probes once every
 2 h (`--probe`: metadata only, no download, no model) and restarts when
