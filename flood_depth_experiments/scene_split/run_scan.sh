@@ -8,7 +8,9 @@
 # every BLOCK_WAIT_S (metadata only, nothing downloaded, no model loaded) and
 # restarts the scan when downloads work again. The scan resumes from its
 # ledger, so nothing is repeated. Exits when the scan finishes (exit 0) or
-# fails for another reason.
+# fails for another reason. BLOCK_WAIT_S=0 stops at the first block instead
+# (exit 3) -- the weekly cron run (scraping/video_scraping/run_weekly.sh) does
+# that, so it retries next week rather than holding on.
 #
 #   setsid nohup flood_depth_experiments/scene_split/run_scan.sh > /dev/null 2>&1 &
 #   tail -f scrape_data/logs/shot-scan.log
@@ -34,6 +36,10 @@ while true; do
     if [ $rc -ne 3 ]; then
         echo "$(date -Is) scan_shots.py exited $rc (not a bot check); stopping"
         exit $rc
+    fi
+    if [ "$BLOCK_WAIT_S" -eq 0 ]; then
+        echo "$(date -Is) YouTube block (bot check, or stream 403s in a row); BLOCK_WAIT_S=0, stopping until the next run"
+        exit 3
     fi
     echo "$(date -Is) YouTube block (bot check, or stream 403s in a row); probing again in ${BLOCK_WAIT_S} s"
     sleep "$BLOCK_WAIT_S"

@@ -30,3 +30,5 @@ data/news/*
 !data/youtube_videos_meta_data.json
 !data/youtube_flood_videos_meta_data.json
 paper_summary/
+# Static export of the data_view site (export_site.py)
+site_build/

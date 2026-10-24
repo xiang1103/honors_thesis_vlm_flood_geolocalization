@@ -24,6 +24,7 @@ const state = {
   page: 1,
   viewerIndex: -1,
   activeShot: -1,
+  framesBase: "/frames",    // the export can point this at other hosting
 };
 
 const $ = (selector) => document.querySelector(selector);
@@ -72,7 +73,13 @@ function clock(seconds) {
 
 function frameUrl(item, shotIndex, frameIndex) {
   // scan_shots.frame_path(): shot numbers from 1, three digits; frames from 0.
-  return `/frames/${item.video_id}/shot${String(shotIndex + 1).padStart(3, "0")}_${frameIndex}.jpg`;
+  return `${state.framesBase}/${item.video_id}/shot${String(shotIndex + 1).padStart(3, "0")}_${frameIndex}.jpg`;
+}
+
+/** The static export may ship frames for flood shots only; it marks the
+ *  rest `frames: false` so they show their times instead of broken images. */
+function hasFrames(item, shot) {
+  return item.has_frames && shot.frames !== false;
 }
 
 // -- depth answers ----------------------------------------------------------
@@ -164,7 +171,8 @@ function coverSurface(item, onOpen) {
   image.referrerPolicy = "no-referrer";
   const first = Math.max(0, item.shots.findIndex((s) => s.flood));
   const middle = item.shots[first] && item.shots[first].answers.length === 3 ? 1 : 0;
-  const candidates = [item.has_frames && item.shots.length ? frameUrl(item, first, middle) : "", item.cover_url]
+  const candidates = [item.shots[first] && hasFrames(item, item.shots[first]) ? frameUrl(item, first, middle) : "",
+    item.cover_url]
     .filter(Boolean);
   let attempt = 0;
   image.onerror = () => {
@@ -292,7 +300,7 @@ function shotCard(item, shot, index) {
   frames.setAttribute("aria-label", `Play shot ${index + 1}`);
   shot.answers.forEach((answer, j) => {
     const cell = node("span", `shot-frame ${answer === "yes" ? "frame-yes" : "frame-no"}`);
-    if (item.has_frames) {
+    if (hasFrames(item, shot)) {
       const image = node("img");
       image.alt = `Shot ${index + 1}, frame at ${clock(shot.times[j] || 0)}`;
       image.loading = "lazy";
@@ -410,7 +418,7 @@ document.addEventListener("keydown", (event) => {
   if (event.key === "ArrowRight") moveViewer(1);
 });
 
-fetch("/api/videos")
+fetch("/api/videos.json")
   .then((response) => {
     if (!response.ok) throw new Error(`Video request failed: ${response.status}`);
     return response.json();
@@ -422,6 +430,7 @@ fetch("/api/videos")
     }
     state.items = catalog.items;
     state.summary = catalog.summary;
+    if (catalog.frames_base) state.framesBase = catalog.frames_base;
     renderSummary();
     renderGrid();
   })

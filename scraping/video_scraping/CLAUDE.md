@@ -17,7 +17,7 @@ root `CLAUDE.md` ("REQUIRED data format for VIDEOS").
 | 5 | **Flood-relevance threshold is 0.3** (`FLOOD_TEXT_THRESHOLD` in `video_signals.py`) | owner's choice 2026-10-06; was an unstored 0.4. Relabel with `--no-search` (~1 unit / 50 videos) |
 | 6 | **Keep relevance ranking.** Walk every page of every search; when all are walked, **start over** (rolling re-walk, oldest page first). Multi-day cycles are fine | owner rejected a date-sorted "what's new" pass because it gives up relevance order (see "Rejected") |
 | 7 | **The ~500-results-per-query cap is accepted** for now | not a concern yet; date-sliced searches are the known fix if it becomes one |
-| 8 | **Run daily from cron on this server** (03:30 Eastern, after the midnight-Pacific quota reset) | GitHub Actions rejected: all scraper state is gitignored and lives here (see "Rejected") |
+| 8 | **Run WEEKLY from cron on this server** (Sunday 03:30 Eastern, after the midnight-Pacific quota reset; scrape -> visual check -> shot scan in one chain, `run_weekly.sh`; daily until 2026-10-24, owner's change) | GitHub Actions rejected: all scraper state is gitignored and lives here (see "Rejected") |
 | 9 | **Videos are NOT downloaded, for now.** Only IDs, metadata, thumbnails and the embed link are stored | owner said "don't make download changes yet" (2026-10-06). See "Downloading" |
 | 10 | **Fields trimmed (2026-10-07)**: `channel_id`, `channel_title`, `category_id`, `language`, `license`, `location_basis`, `ny_basis`, `ny_places`, `flood_text_hits`, `queries`, `text` and `api_fields` are no longer stored, in existing data or future scrapes. 23 fields remain (`VIDEO_FIELDS`) | owner's cleanup. Master file 21 MB -> 8 MB. Labels unchanged: channel title, category and the joined text are still read from the API response while labelling, then discarded. Lost: auditing a score from the file, and re-deriving fields without the API (a re-check costs ~1 unit / 50 videos anyway). `queries` is recoverable from the JSONL. Earlier decision to keep `api_fields` (~46% of the file) reversed. Second trim the same day: `flood_text_relevant` (derivable: score >= 0.3) and `flood_event_date` dropped too -> 21 fields; the event-date signal is no longer computed |
 | 11 | **Two files: the master keeps every video; a derived flood-only dataset** (`data/youtube_flood_videos.json`) holds ALL flood videos, NY or not (2026-10-07) | dropping non-flood videos from the master would make relabelling cost quota, and the JSONL still lists their IDs, so every night would re-fetch and re-judge them. The derived file is the one to hand out or train on |
@@ -79,10 +79,10 @@ moment**.
    (`export_flood_videos.is_flood()`: `flood_text_score >= 0.3`, `available`,
    and `flood_visual.flood is True`) and its metadata. Changing the rule
    needs no API: re-run `export_flood_videos.py`.
-6. **Visual check** (separate, GPU; its own cron entry at 05:00, after the
-   scrape): `verification/verify_video_frames.py` (default `--device-map
+6. **Visual check** (separate, GPU; step 2 of the weekly `run_weekly.sh`,
+   right after the scrape): `verification/verify_video_frames.py` (default `--device-map
    free`: the GPU with the most free memory, >= 60 GiB, picked at run time;
-   none free -> it skips the night and the videos wait) asks
+   none free -> it skips the week and the videos wait) asks
    the local model "is there any flooding visible?" for each of YouTube's
    three automatic frames, records them in
    `scrape_data/youtube_frame_answers.jsonl` (resume ledger, a cache: never
@@ -433,18 +433,20 @@ YouTube allows downloads again. Log: `scrape_data/logs/shot-scan.log`; a lock
 stops a second loop. Cookies from a signed-in account were NOT used (owner
 did not choose that; it risks the account).
 
-**Nightly from cron, and two stops fixed (2026-10-24).** The scan had sat idle
+**Cron, and two stops fixed (2026-10-24).** The scan had sat idle
 since 2026-10-19: `--probe` tested only the first pending video, which had
 gone private, and an `Unavailable` there stopped the loop. The probe now skips
 gone videos (up to 10) and tests the next one; the scan itself records them as
-permanent errors and moves on. `run_scan.sh` now runs from cron, weekly on Sunday at 06:00 (owner, 2026-10-24; after
-the 05:00 visual check); the lock makes a run that is still going (or waiting
-out a block) end the new one. Also new that day: YouTube refused every media
+permanent errors and moves on. `run_scan.sh` now runs from cron, WEEKLY, as the
+last step of `scraping/video_scraping/run_weekly.sh` (Sunday 03:30: scrape ->
+visual check -> shot scan; owner, 2026-10-24), with `BLOCK_WAIT_S=0`: on a
+YouTube block it stops (exit 3) and the next try is next week, instead of
+probing every 2 h. The lock makes a run that is still going end the new one. Also new that day: YouTube refused every media
 stream (HTTP 403, https and HLS alike, yt-dlp 2026.10.21, no PO-token
 provider) while metadata still worked, so the probe passes but downloads
 fail. `scan_shots.py` now treats `STREAM_403_BLOCK` (5) stream 403s in a row as
-a block and exits 3, so the loop waits 2 h rather than failing through the
-whole list. Those 403s are logged as transient and retried.
+a block and exits 3, so the run stops (or, run by hand, waits 2 h) rather
+than failing through the whole list. Those 403s are logged as transient and retried.
 
 **PO-token provider installed (owner, 2026-10-24) -- it did NOT lift the 403.**
 `bgutil-ytdlp-pot-provider` 2.0.2, script mode on Deno (system Node is v18, it
@@ -458,9 +460,9 @@ it can fail once after a long idle). yt-dlp's default clients (`tv`,
 ("Retrieved a gvs PO Token"), and the stream still answers 403 -- for
 "Me at the zoo" (jNQXAC9IVRw) too. So the block is on this server's IP
 (130.245.4.197), not a missing token. `youtube_download.py` keeps yt-dlp's
-default clients; the provider is there for when one needs a token. The
-nightly loop retries every 2 h, so the scan resumes on its own if the block
-lifts. Not tried: cookies (owner declined).
+default clients; the provider is there for when one needs a token. The weekly
+run retries, so the scan resumes on its own within a week of the block
+lifting. Not tried: cookies (owner declined).
 
 **Proxy fallback (owner, 2026-10-24): proxy AND wait.** `YTDLP_PROXY` (env,
 else `.env`; template in `.env.example`) is any yt-dlp proxy URL. Each process
@@ -604,9 +606,12 @@ review page), download failure rate. Then fix the thresholds and run the rest.
 ## Operating it
 
 ```bash
-crontab -l                                         # the daily jobs (03:30 scrape, 05:00 visual check)
-tail -30 scrape_data/logs/youtube-frames-cron.log  # what last night's visual check did
-tail -30 scrape_data/logs/youtube-cron.log         # what last night did
+crontab -l                                         # ONE weekly job, Sunday 03:30: run_weekly.sh
+tail scrape_data/logs/youtube-weekly.log           # each step's start and exit code
+tail -30 scrape_data/logs/youtube-cron.log         # what the last scrape did
+tail -30 scrape_data/logs/youtube-frames-cron.log  # what the last visual check did
+tail -30 scrape_data/logs/shot-scan.log            # what the last shot scan did
+scraping/video_scraping/run_weekly.sh              # the whole chain by hand
 python3 scraping/video_scraping/youtube_scrape.py --plan        # searches + cost, no API calls
 python3 scraping/video_scraping/youtube_scrape.py --no-search   # relabel / re-check only, ~60 units
 ```
@@ -627,5 +632,5 @@ re-read when they change. The player needs a referrer (YouTube error
 153 without one), so the iframe sets its own `referrerPolicy` while the rest
 of the site stays `no-referrer`.
 
-A manual run while the nightly one holds the lock exits at once ("another run
+A manual run while the weekly one holds the lock exits at once ("another run
 holds ..."). Manual runs share the same 10,000-unit daily quota.

@@ -64,6 +64,17 @@ VIDEO_REVIEW_ID_SCHEME = "youtube_review_v1"
 #: The only third-party frame the pages may load: YouTube's privacy-enhanced
 #: player, used by the video detail view.
 VIDEO_EMBED_ORIGIN = "https://www.youtube-nocookie.com"
+#: Sent with every response, here and (via export_site.py's vercel.json) on
+#: the published copy: images only over https, the one third-party frame.
+SECURITY_HEADERS = {
+    "X-Content-Type-Options": "nosniff",
+    "Referrer-Policy": "no-referrer",
+    "Content-Security-Policy": (
+        "default-src 'self'; img-src 'self' https: data:; "
+        "style-src 'self'; script-src 'self'; connect-src 'self'; "
+        f"frame-src {VIDEO_EMBED_ORIGIN}"
+    ),
+}
 
 SOURCE_LABELS = {
     "mycoast": "MyCoast",
@@ -487,10 +498,11 @@ def make_handler(catalog: dict, videos: FloodVideoCatalog):
 
         def do_GET(self):  # noqa: N802 - stdlib handler API
             path = self.path.split("?", 1)[0]
-            if path == "/api/images":
+            # The pages ask for *.json, the names the static export writes.
+            if path in ("/api/images", "/api/images.json"):
                 self._send(payload, "application/json; charset=utf-8")
                 return
-            if path == "/api/videos":
+            if path in ("/api/videos", "/api/videos.json"):
                 self._send(videos.payload(), "application/json; charset=utf-8")
                 return
             if path.startswith("/frames/"):
@@ -515,17 +527,10 @@ def make_handler(catalog: dict, videos: FloodVideoCatalog):
             self.wfile.write(body)
 
         def end_headers(self):
-            # Same headers as the news site: never cache (a stale app.js
-            # against fresh markup fails silently), and images only over https.
+            # Never cache (a stale app.js against fresh markup fails silently).
             self.send_header("Cache-Control", "no-store, must-revalidate")
-            self.send_header("X-Content-Type-Options", "nosniff")
-            self.send_header("Referrer-Policy", "no-referrer")
-            self.send_header(
-                "Content-Security-Policy",
-                "default-src 'self'; img-src 'self' https: data:; "
-                "style-src 'self'; script-src 'self'; connect-src 'self'; "
-                f"frame-src {VIDEO_EMBED_ORIGIN}",
-            )
+            for name, value in SECURITY_HEADERS.items():
+                self.send_header(name, value)
             super().end_headers()
 
     return ReviewHandler

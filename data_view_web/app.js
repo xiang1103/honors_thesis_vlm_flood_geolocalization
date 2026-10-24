@@ -316,7 +316,7 @@ document.addEventListener("keydown", (event) => {
   if (event.key === "ArrowRight") moveViewer(1);
 });
 
-fetch("/api/images")
+fetch("/api/images.json")
   .then((response) => {
     if (!response.ok) throw new Error(`Catalog request failed: ${response.status}`);
     return response.json();

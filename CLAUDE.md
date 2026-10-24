@@ -315,6 +315,7 @@ image_review_web/  + image_review_server.py   news review site (human + model)  
 data_view_web/    + data_view_server.py     data_view, read-only, two tabs    :8768
                                                /: MyCoast photos (app.js)
                                                /videos.html: valid flood videos -- shots + depth C1-C5 (videos.js)
+export_site.py    static copy of data_view for hosting -> site_build/ (gitignored)
 make_metadata.py  writes data/news/meta_data.json (news dataset snapshot)
 make_mycoast_metadata.py  writes data/mycoast_meta_data.json (MyCoast snapshot)
 make_youtube_metadata.py  writes data/youtube_videos_meta_data.json (called by youtube_scrape.py)
@@ -375,14 +376,14 @@ python3 make_mycoast_metadata.py                  # data/mycoast_meta_data.json 
 
 # videos (no GPU; needs YOUTUBE_API_KEY in .env or the environment)
 python3 scraping/video_scraping/youtube_scrape.py --plan          # searches + quota cost, no API calls
-python3 scraping/video_scraping/youtube_scrape.py                 # DAILY routine (cron): walk unfetched pages by
+python3 scraping/video_scraping/youtube_scrape.py                 # routine (WEEKLY cron, step 1): walk unfetched pages by
                                                                   # relevance, breadth-first; when all are walked,
                                                                   # re-walk oldest first (~8-day cycle); writes metadata
 python3 scraping/video_scraping/youtube_scrape.py --no-search     # re-check + relabel existing, ~free
 python3 scraping/video_scraping/youtube_scrape.py --query "flooded street queens"   # ad hoc
 python3 scraping/video_scraping/export_flood_videos.py            # rebuild the flood-only file alone, no API
 python3 verification/verify_video_frames.py                       # visual check of unanswered frames, freest GPU
-                                                                  # (cron, 05:00); then rebuilds the flood file
+                                                                  # (WEEKLY cron, step 2); then rebuilds the flood file
 python3 make_youtube_metadata.py                                  # metadata alone
 
 # review sites
@@ -390,29 +391,36 @@ python3 image_review_server.py          # :8765 news, human labels + model answe
 python3 data_view_server.py            # :8768 data_view: MyCoast rows of gis_flood_images.json;
                                         # /videos.html joins the shot-scan ledger (--shots), a depth
                                         # run (--depth, default full_5cm) and youtube_videos.json
+python3 export_site.py                  # static data_view -> site_build/ (pages, api/*.json, frames,
+                                        # vercel.json); first run ~10 min (frames over NFS), then ~40 s
+python3 export_site.py --frames none    # without the scan's frames (cards fall back to YouTube's cover)
 ```
 
 `data_view_server.py` and `map_countries.py --serve` both default to :8768;
 pass `--port` to one of them if both are running.
 
 Long crawls: `./scraping/run_crawl.sh` (tmux, survives disconnect).
-YouTube runs DAILY from cron (installed 2026-10-07, `crontab -l`): 03:30 server time
-(Eastern; the quota resets at midnight Pacific), the routine command above, log
-appended to `scrape_data/logs/youtube-cron.log`. A second run while one holds the
-lock exits at once (`another run holds ...`), so a manual run cannot collide with it.
-The visual check runs DAILY from cron too (installed 2026-10-07): 05:00,
-`verification/verify_video_frames.py` with no arguments -- it checks only frames
-not yet answered (new videos, earlier fetch failures), exits without loading the
-model when there are none, picks the GPU with the most free memory at run time
-(>= 60 GiB, else it skips the night), and has its own lock. Log appended to
-`scrape_data/logs/youtube-frames-cron.log`.
-The shot scan runs WEEKLY from cron (installed 2026-10-24, weekly from the same day): Sunday 06:00,
-`flood_depth_experiments/scene_split/run_scan.sh` -- scans flood videos (<= 300 s) not yet in
-`scrape_data/youtube_shot_scan/`, waits out YouTube blocks, has its own lock. Log:
-`scrape_data/logs/shot-scan.log`. As of 2026-10-24 YouTube refuses every media
+YouTube runs WEEKLY from cron (owner, 2026-10-24; daily from 2026-10-07 until
+then, `crontab -l`): Sunday 03:30 server time (Eastern; the quota resets at
+midnight Pacific), ONE entry, `scraping/video_scraping/run_weekly.sh`, which runs
+three steps one after another, each needing the one before (a failed step does
+not stop the later ones; one line per step in `scrape_data/logs/youtube-weekly.log`):
+1. the scrape, the routine command above; log `scrape_data/logs/youtube-cron.log`.
+   A second run while one holds the lock exits at once (`another run holds ...`),
+   so a manual run cannot collide with it.
+2. the visual check, `verification/verify_video_frames.py` with no arguments -- it
+   checks only frames not yet answered (new videos, earlier fetch failures), exits
+   without loading the model when there are none, picks the GPU with the most free
+   memory at run time (>= 60 GiB, else it skips the week), and has its own lock.
+   Log `scrape_data/logs/youtube-frames-cron.log`.
+3. the shot scan, `flood_depth_experiments/scene_split/run_scan.sh` with `BLOCK_WAIT_S=0` --
+   scans flood videos (<= 300 s) not yet in `scrape_data/youtube_shot_scan/`; if
+   YouTube blocks downloads it stops and the next try is next week (run by hand
+   without `BLOCK_WAIT_S=0`, it waits out blocks, probing every 2 h). Own lock.
+   Log `scrape_data/logs/shot-scan.log`. As of 2026-10-24 YouTube refuses every media
 stream (403) from this server's IP, even with the PO-token provider installed
 (`bgutil-ytdlp-pot-provider`, Deno script mode, repo at `~/bgutil-ytdlp-pot-provider`),
-so it currently scans nothing. A proxy fallback exists (`YTDLP_PROXY` in `.env`,
+so step 3 currently scans nothing. A proxy fallback exists (`YTDLP_PROXY` in `.env`,
 used only after the direct route is refused; unset as of 2026-10-24); see "Nightly
 from cron", "PO-token provider" and "Proxy fallback" in `scraping/video_scraping/CLAUDE.md`.
 MyCoast update: `./scraping/update_mycoast.sh` (scrape -> dedupe -> metadata -> gis refresh,
@@ -774,8 +782,8 @@ Priority is MyCoast and MyCoast-like sources (owner's direction, 2026-09-28).
 5. Near-duplicate detection with a signal that works.
 6. YouTube (first run done 2026-10-06; visual check and review page built
    2026-10-07): calibrate the text threshold and the visual rule against
-   hand labels from the :8768 Videos page. Both steps run nightly from cron
-   (scrape 03:30, visual check 05:00).
+   hand labels from the :8768 Videos page. Both steps, and the shot scan,
+   run weekly from cron (Sunday 03:30, `run_weekly.sh`, one after another).
    Details and open questions in `scraping/video_scraping/design.md`.
    NEXT (planned 2026-10-08, not implemented): split each flood video into
    flood-only **scenes** -- a `scenes` field of time ranges per place, non-flood
