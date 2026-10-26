@@ -25,7 +25,8 @@ step() {
     local name=$1; shift
     echo "$(date -Is) $name: start" >> "$STEPS"
     "$@"
-    echo "$(date -Is) $name: exit $?" >> "$STEPS"
+    local rc=$?                 # before $(date ...), which would reset $?
+    echo "$(date -Is) $name: exit $rc" >> "$STEPS"
 }
 
 step scrape "$PY" scraping/video_scraping/youtube_scrape.py >> scrape_data/logs/youtube-cron.log 2>&1

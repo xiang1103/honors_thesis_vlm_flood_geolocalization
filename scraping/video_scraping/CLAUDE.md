@@ -463,6 +463,15 @@ it can fail once after a long idle). yt-dlp's default clients (`tv`,
 default clients; the provider is there for when one needs a token. The weekly
 run retries, so the scan resumes on its own within a week of the block
 lifting. Not tried: cookies (owner declined).
+**Confirmed IP block (2026-10-24):** the same yt-dlp download of jNQXAC9IVRw
+worked from the owner's laptop on another network the same day, while this
+server got 403 -- so it is this server's address, not a YouTube-wide change.
+**It lifted on its own the next day** (between the 00:06 and 06:06 probes of
+2026-10-25, ~1 day after it was noticed, 6 days after the last download). The
+6-hour loop (`BLOCK_WAIT_S=21600 run_scan.sh`, started by hand 2026-10-24)
+then scanned 211 videos until a bot check at 08:52 and 121 more after the
+14:52 probe until another at 15:52 -- the Oct 15-17 pattern of short bot-check
+blocks is back, the 403 is gone.
 
 **Proxy fallback (owner, 2026-10-24): proxy AND wait.** `YTDLP_PROXY` (env,
 else `.env`; template in `.env.example`) is any yt-dlp proxy URL. Each process

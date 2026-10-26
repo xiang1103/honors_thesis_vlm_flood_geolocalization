@@ -394,6 +394,8 @@ python3 data_view_server.py            # :8768 data_view: MyCoast rows of gis_fl
 python3 export_site.py                  # static data_view -> site_build/ (pages, api/*.json, frames,
                                         # vercel.json); first run ~10 min (frames over NFS), then ~40 s
 python3 export_site.py --frames none    # without the scan's frames (cards fall back to YouTube's cover)
+./deploy_site.sh                        # PUBLISH: export -> frames to R2 (rclone, new only) -> Vercel (--prod);
+                                        # credentials in .env; DRY_RUN=1 to see the upload without doing it
 ```
 
 `data_view_server.py` and `map_countries.py --serve` both default to :8768;
@@ -418,7 +420,8 @@ not stop the later ones; one line per step in `scrape_data/logs/youtube-weekly.l
    YouTube blocks downloads it stops and the next try is next week (run by hand
    without `BLOCK_WAIT_S=0`, it waits out blocks, probing every 2 h). Own lock.
    Log `scrape_data/logs/shot-scan.log`. As of 2026-10-24 YouTube refuses every media
-stream (403) from this server's IP, even with the PO-token provider installed
+stream (403) from this server's IP (confirmed: the same download works from another
+network), even with the PO-token provider installed
 (`bgutil-ytdlp-pot-provider`, Deno script mode, repo at `~/bgutil-ytdlp-pot-provider`),
 so step 3 currently scans nothing. A proxy fallback exists (`YTDLP_PROXY` in `.env`,
 used only after the direct route is refused; unset as of 2026-10-24); see "Nightly

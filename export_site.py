@@ -16,10 +16,12 @@ needs no server:
 It reuses the server's own loaders, so the published copy shows exactly what
 `python3 data_view_server.py` shows on the day it is built.
 
-    python3 export_site.py                        # -> site_build/, flood-shot frames
+    python3 export_site.py                        # -> site_build/, flood-shot frames inside it
     python3 export_site.py --frames none          # pages + data only (frames fall back to YouTube's cover)
-    python3 export_site.py --frames-url https://cdn.example.org/frames --frames none
-                                                  # frames hosted elsewhere
+    python3 export_site.py --frames-url https://pub-xxxx.r2.dev/frames
+                                                  # frames hosted elsewhere (R2): NOT copied into
+                                                  # the build; their list goes to FRAMES_MANIFEST
+                                                  # for deploy_site.sh to upload
 
 Frames are synced, not re-copied: an unchanged file is left alone and a frame
 no longer wanted is deleted, so a daily run only writes what is new. The
@@ -44,6 +46,10 @@ import data_view_server as server
 PROJECT = Path(__file__).resolve().parent
 DEFAULT_OUT = PROJECT / "site_build"
 MARKER = ".data_view_export"
+#: With --frames-url: the frames the page will ask for, one path per line
+#: relative to the scan's frames folder (rclone --files-from). Outside the
+#: build so it is never published.
+FRAMES_MANIFEST = PROJECT / "scrape_data" / "site_frames.txt"
 PAGES = ["index.html", "videos.html", "app.js", "videos.js", "gis.css"]
 
 #: What videos.js reads; everything else in the server's payload is dropped.
@@ -64,6 +70,8 @@ def prepare_out(out: Path) -> None:
         sys.exit(f"{out} exists, is not empty and has no {MARKER}: refusing to write into it.")
     out.mkdir(parents=True, exist_ok=True)
     (out / MARKER).write_text("written by export_site.py; safe to delete\n", encoding="utf-8")
+    # The marker is ours, not the site's; .vercel/ (the CLI's project link) is kept.
+    (out / ".vercelignore").write_text(f"{MARKER}\n", encoding="utf-8")
 
 
 def write_json(path: Path, value) -> None:
@@ -157,7 +165,8 @@ def vercel_config() -> dict:
 
 
 def build_size(out: Path) -> tuple[int, int]:
-    files = [p for p in out.rglob("*") if p.is_file() and p.name != MARKER]
+    files = [p for p in out.rglob("*") if p.is_file() and p.name not in (MARKER, ".vercelignore")
+             and ".vercel" not in p.relative_to(out).parts]
     return len(files), sum(p.stat().st_size for p in files)
 
 
@@ -167,7 +176,7 @@ def main() -> None:
     ap.add_argument("--frames", choices=["flood", "all", "none"], default="flood",
                     help="which scan frames to ship: flood shots only (default), every shot, or none")
     ap.add_argument("--frames-url", default="",
-                    help="frames are hosted at this base URL instead of /frames (use with --frames none)")
+                    help="frames are hosted at this base URL instead of /frames; --frames still picks which")
     ap.add_argument("--shots", type=Path, default=server.DEFAULT_SHOTS)
     ap.add_argument("--depth", type=Path, default=server.DEFAULT_DEPTH)
     ap.add_argument("--videos", type=Path, default=server.DEFAULT_VIDEOS)
@@ -186,18 +195,22 @@ def main() -> None:
     wanted = wanted_frames(videos, args.frames, args.shots / "frames")
     if args.frames_url:
         videos["frames_base"] = args.frames_url.rstrip("/")
-        for item in videos["items"]:            # hosted elsewhere: show them all
-            for shot in item["shots"]:
-                shot.pop("frames", None)
+        FRAMES_MANIFEST.parent.mkdir(parents=True, exist_ok=True)
+        tmp = FRAMES_MANIFEST.with_name(FRAMES_MANIFEST.name + ".tmp")
+        tmp.write_text("".join(f"{rel.as_posix()}\n" for rel in sorted(wanted)), encoding="utf-8")
+        os.replace(tmp, FRAMES_MANIFEST)
+        copied, deleted = sync_frames({}, out / "frames")     # none in the build itself
+    else:
+        copied, deleted = sync_frames(wanted, out / "frames")
     write_json(out / "api" / "videos.json", videos)
-    copied, deleted = sync_frames(wanted, out / "frames")
     write_json(out / "vercel.json", vercel_config())
 
     files, size = build_size(out)
     vs = videos["summary"]
+    where = f"listed in {FRAMES_MANIFEST} for {args.frames_url}" if args.frames_url else \
+        f"{copied:,} copied into the build"
     print(f"photos: {photos['summary']['images']:,}   videos: {vs['videos']:,} "
-          f"({vs['with_depth']:,} with depth)   frames: {len(wanted):,} "
-          f"({copied:,} copied, {deleted:,} removed)")
+          f"({vs['with_depth']:,} with depth)   frames: {len(wanted):,} ({where}; {deleted:,} removed from the build)")
     print(f"build: {out}  {files:,} files, {size / 1e6:,.1f} MB")
     if files > VERCEL_MAX_FILES or size > VERCEL_HOBBY_UPLOAD_MB * 1e6:
         print(f"note: above Vercel's documented CLI limits ({VERCEL_MAX_FILES:,} files; "
