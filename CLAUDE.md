@@ -405,7 +405,8 @@ Long crawls: `./scraping/run_crawl.sh` (tmux, survives disconnect).
 YouTube runs WEEKLY from cron (owner, 2026-10-24; daily from 2026-10-07 until
 then, `crontab -l`): Sunday 03:30 server time (Eastern; the quota resets at
 midnight Pacific), ONE entry, `scraping/video_scraping/run_weekly.sh`, which runs
-three steps one after another, each needing the one before (a failed step does
+four steps one after another (the fourth, added 2026-10-26, is `./deploy_site.sh`,
+log `scrape_data/logs/deploy-site.log`), each needing the one before (a failed step does
 not stop the later ones; one line per step in `scrape_data/logs/youtube-weekly.log`):
 1. the scrape, the routine command above; log `scrape_data/logs/youtube-cron.log`.
    A second run while one holds the lock exits at once (`another run holds ...`),

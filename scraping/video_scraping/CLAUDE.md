@@ -620,6 +620,7 @@ tail scrape_data/logs/youtube-weekly.log           # each step's start and exit 
 tail -30 scrape_data/logs/youtube-cron.log         # what the last scrape did
 tail -30 scrape_data/logs/youtube-frames-cron.log  # what the last visual check did
 tail -30 scrape_data/logs/shot-scan.log            # what the last shot scan did
+tail -30 scrape_data/logs/deploy-site.log          # step 4 (2026-10-26): new frames -> R2, site -> Vercel
 scraping/video_scraping/run_weekly.sh              # the whole chain by hand
 python3 scraping/video_scraping/youtube_scrape.py --plan        # searches + cost, no API calls
 python3 scraping/video_scraping/youtube_scrape.py --no-search   # relabel / re-check only, ~60 units
