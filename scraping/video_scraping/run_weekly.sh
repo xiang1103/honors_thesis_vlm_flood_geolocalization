@@ -1,13 +1,14 @@
 #!/usr/bin/env bash
 # The WEEKLY YouTube routine (owner, 2026-10-24; replaces the daily 03:30 scrape
 # and 05:00 visual check), from cron on Sunday 03:30, after the API quota reset
-# at midnight Pacific. The three steps run one after another, each needing the
+# at midnight Pacific. The steps run one after another, each needing the
 # one before:
 #
 #   1. youtube_scrape.py        search -> labels -> flood file + metadata
 #   2. verify_video_frames.py   VLM on the 3 auto-frames of new videos -> flood file
 #   3. run_scan.sh              shot scan of flood videos not yet in the ledger
-#   4. deploy_site.sh           publish data_view: new frames -> R2, site -> Vercel
+#   4. run_new.sh               VLM water depth (C1-C5) for shots not yet answered
+#   5. deploy_site.sh           publish data_view: new frames -> R2, site -> Vercel
 #
 # A step that fails does not stop the later ones: each also works on what is
 # already there. Each step logs to its own file, as before. The shot scan runs
@@ -33,5 +34,6 @@ step() {
 step scrape "$PY" scraping/video_scraping/youtube_scrape.py >> scrape_data/logs/youtube-cron.log 2>&1
 step frames "$PY" verification/verify_video_frames.py >> scrape_data/logs/youtube-frames-cron.log 2>&1
 step shots env BLOCK_WAIT_S=0 flood_depth_experiments/scene_split/run_scan.sh
+step depth flood_depth_experiments/flood_depth/run_new.sh       # logs to flood-depth-weekly.log
 # Its own log is scrape_data/logs/deploy-site.log; the output here is a copy of it.
 step deploy ./deploy_site.sh > /dev/null 2>&1

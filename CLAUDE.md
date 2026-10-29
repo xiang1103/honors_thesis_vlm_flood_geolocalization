@@ -405,8 +405,8 @@ Long crawls: `./scraping/run_crawl.sh` (tmux, survives disconnect).
 YouTube runs WEEKLY from cron (owner, 2026-10-24; daily from 2026-10-07 until
 then, `crontab -l`): Sunday 03:30 server time (Eastern; the quota resets at
 midnight Pacific), ONE entry, `scraping/video_scraping/run_weekly.sh`, which runs
-four steps one after another (the fourth, added 2026-10-26, is `./deploy_site.sh`,
-log `scrape_data/logs/deploy-site.log`), each needing the one before (a failed step does
+five steps one after another (depth, then `./deploy_site.sh` last, both added
+2026-10-26; deploy logs to `scrape_data/logs/deploy-site.log`), each needing the one before (a failed step does
 not stop the later ones; one line per step in `scrape_data/logs/youtube-weekly.log`):
 1. the scrape, the routine command above; log `scrape_data/logs/youtube-cron.log`.
    A second run while one holds the lock exits at once (`another run holds ...`),
@@ -427,6 +427,13 @@ network), even with the PO-token provider installed
 so step 3 currently scans nothing. A proxy fallback exists (`YTDLP_PROXY` in `.env`,
 used only after the direct route is refused; unset as of 2026-10-24); see "Nightly
 from cron", "PO-token provider" and "Proxy fallback" in `scraping/video_scraping/CLAUDE.md`.
+4. water depth, `flood_depth_experiments/flood_depth/run_new.sh` -- C1-C5 answers
+   (`run_all.py`, `full_5cm/`) for flood shots the scan added since the last run, so
+   the Videos page's depth chips cover new videos. Exits without loading a model
+   when nothing is pending; up to 3 GPUs with >= 60 GiB free, picked at run time;
+   waits for every shard. Own lock. Log `scrape_data/logs/flood-depth-weekly.log`.
+   Added 2026-10-26: until then `full_5cm` was a one-off (2026-10-21, 9,910 shots
+   / 1,928 videos) and every later video showed no depth.
 MyCoast update: `./scraping/update_mycoast.sh` (scrape -> dedupe -> metadata -> gis refresh,
 stops on first failure, log in `scrape_data/logs/mycoast-update_latest.log`).
 
