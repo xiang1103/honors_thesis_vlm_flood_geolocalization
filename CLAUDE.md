@@ -310,7 +310,9 @@ verification/     judging only         verify_text.py, verify_images_vlm.py, ded
                                        compile_countries.py
 local_vlm/        model mechanics      backend.py, download_model.py
 flood_depth_experiments/ scene_split/ (shot detection + per-shot flood scan),
-                  flood_depth/ (water-depth benchmark, PLAN.md)
+                  flood_depth/ (water-depth benchmark, PLAN.md),
+                  depth_detection/ (geometry depth: MoGe-2 + segmentation, design in
+                  docs/water_depth_segmentation.md)
 image_review_web/  + image_review_server.py   news review site (human + model)  :8765
 data_view_web/    + data_view_server.py     data_view, read-only, two tabs    :8768
                                                /: MyCoast photos (app.js)

@@ -55,7 +55,7 @@ PAGES = ["index.html", "videos.html", "app.js", "videos.js", "gis.css"]
 #: What videos.js reads; everything else in the server's payload is dropped.
 VIDEO_KEYS = ["video_id", "title", "published", "duration_s", "location", "description",
               "source_url", "embed_url", "cover_url", "has_frames",
-              "n_shots", "n_flood", "flood_s", "flood_share", "depth_label", "shots"]
+              "n_shots", "n_flood", "flood_s", "flood_share", "n_depth", "shots"]
 SHOT_KEYS = ["start", "end", "flood", "answers", "times", "depth"]
 
 #: Vercel's documented CLI deployment limits (docs/limits, checked

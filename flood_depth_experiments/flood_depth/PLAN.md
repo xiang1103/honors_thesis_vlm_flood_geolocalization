@@ -184,10 +184,10 @@ old predictions are preserved.
 - `video_labels.json` — **per-video labels for display** (owner, 2026-10-21),
   rebuilt by `make_video_labels.py` when each shard finishes (or by hand). Per
   video: every judged shot with its `[start, end]` and all answers, and per
-  condition a summary label: `deepest` answer (and which shot), `median_cm`
-  (`median_level` for the L0–L5 run), `answered`, `x`. The deepest shot is the
-  label because the scale measures depth at the deepest place visible. Built
-  for both runs (`full/` too).
+  condition a summary: `median_cm` (`median_level` for the L0–L5 run),
+  `answered`, `x`. The `deepest` answer (and its shot) was removed from
+  computing and display on 2026-10-29 (owner): one misjudged shot set the
+  whole video's label. Built for both runs (`full/` too).
 
 **Answers outside the requested width are kept (owner, 2026-10-21).** The
 prompt asks for an interval at most 5 cm wide, as precise as the evidence

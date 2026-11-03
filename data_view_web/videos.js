@@ -8,7 +8,6 @@
 
 const PAGE_SIZE = 24;
 const CONDS = ["C1", "C2", "C3", "C4", "C5"];
-const SORT_COND = "C5";
 
 const LOCATION_BADGE = {
   nyc: ["NYC", "nyc"],
@@ -113,10 +112,6 @@ function depthChips(answers) {
   return chips;
 }
 
-function deepestCm(item) {
-  return item.depth_label ? midpoint(item.depth_label[SORT_COND]) : null;
-}
-
 // -- timeline ---------------------------------------------------------------
 
 /** Flood / not-flood shots as coloured blocks; the gaps between them
@@ -202,9 +197,6 @@ function renderCard(item, index) {
   body.append(node("p", "card-meta",
     [item.published ? `uploaded ${item.published.slice(0, 10)}` : "", clock(item.duration_s),
       `${item.n_flood} flood shot${item.n_flood === 1 ? "" : "s"}`].filter(Boolean).join(" · ")));
-  if (item.depth_label && item.depth_label[SORT_COND]) {
-    body.append(node("p", "card-meta", `deepest water: ${item.depth_label[SORT_COND]}`));
-  }
   card.append(body);
   return card;
 }
@@ -214,8 +206,8 @@ function renderCard(item, index) {
 function matches(item, words) {
   if (ui.location.value !== "all" && item.location !== ui.location.value) return false;
   const depth = ui.depthFilter.value;
-  if (depth === "with" && !item.depth_label) return false;
-  if (depth === "without" && item.depth_label) return false;
+  if (depth === "with" && !item.n_depth) return false;
+  if (depth === "without" && item.n_depth) return false;
   if (words.length) {
     const haystack = item._search || (item._search = `${item.title}\n${item.video_id}`.toLowerCase());
     if (!words.every((word) => haystack.includes(word))) return false;
@@ -227,7 +219,6 @@ function filteredItems() {
   const words = ui.search.value.toLowerCase().split(/\s+/).filter(Boolean);
   const order = ui.sortOrder.value;
   return state.items.filter((item) => matches(item, words)).sort((a, b) => {
-    if (order === "deep") return (deepestCm(b) ?? -1) - (deepestCm(a) ?? -1);
     if (order === "flood_s") return b.flood_s - a.flood_s;
     if (order === "shots") return b.n_flood - a.n_flood;
     return (b.published || "").localeCompare(a.published || "");
@@ -281,8 +272,9 @@ function playShot(index) {
   const shot = item && item.shots[index];
   if (!shot) return;
   state.activeShot = index;
-  // The embed takes whole seconds; floor/ceil so the shot is never cut short.
-  ui.player.src = `${item.embed_url}?start=${Math.floor(shot.start)}&end=${Math.ceil(shot.end)}`
+  // The embed takes whole seconds; floor so the shot is never cut short. No
+  // end=: the video plays on past the shot instead of stopping (owner, 2026-10-29).
+  ui.player.src = `${item.embed_url}?start=${Math.floor(shot.start)}`
     + "&autoplay=1&rel=0&modestbranding=1";
   for (const el of ui.viewer.querySelectorAll(".is-active")) el.classList.remove("is-active");
   for (const el of ui.viewer.querySelectorAll(`[data-index="${index}"]`)) el.classList.add("is-active");
@@ -355,11 +347,9 @@ function renderViewer() {
     metadataRow("Flood shots", `${item.n_flood} of ${item.n_shots}, ${item.flood_s.toFixed(1)} s `
       + `(${Math.round(100 * item.flood_share)}% of the video)`),
   ];
-  if (item.depth_label) {
-    rows.push(metadataRow("Deepest water", CONDS.map((c) => `${c} ${item.depth_label[c] ?? "–"}`).join(" · ")));
-  } else {
-    rows.push(metadataRow("Deepest water", "not estimated yet"));
-  }
+  rows.push(metadataRow("Water depth", item.n_depth
+    ? `estimated for ${item.n_depth} of ${item.n_flood} flood shots (C1-C5 on each shot)`
+    : "not estimated yet"));
   rows.push(metadataRow("Video id", item.video_id));
   ui.viewerMetadata.replaceChildren(...rows);
   ui.viewerDescription.textContent = item.description || "";

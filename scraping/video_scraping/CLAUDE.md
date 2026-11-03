@@ -631,7 +631,8 @@ python3 scraping/video_scraping/youtube_scrape.py --no-search   # relabel / re-c
 `videos.js`). Since 2026-10-24 it shows only VALID flood videos: scanned,
 at least one flood shot, not `ai_video: true` (`is_valid_flood()` in the
 server; unscanned videos are not shown). Cards: frame, timeline, location
-badge, title, upload date, duration, flood shots, deepest water (C5). The
+badge, title, upload date, duration, flood shots (the "deepest water" line
+and sort were removed 2026-10-29, owner). The
 detail view embeds YouTube's player (`youtube-nocookie.com`, the only frame
 the site's CSP allows) above the shot list; each flood shot shows its
 frames and its depth answer under C1-C5. Read-only (the review decisions

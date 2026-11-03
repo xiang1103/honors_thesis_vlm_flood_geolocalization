@@ -405,27 +405,26 @@ def is_valid_flood(item: dict) -> bool:
     return item["n_flood"] > 0 and item["ai_video"] is not True
 
 
-def depth_by_shot(depth_catalog: dict) -> tuple[dict, dict]:
-    """(video_id -> {shot number -> {cond: answer}}, video_id -> label) from a
-    depth run. C1 asked each frame on its own; its key-frame answer is the one
-    shown, as on the old depth page."""
+def depth_by_shot(depth_catalog: dict) -> dict:
+    """video_id -> {shot number -> {cond: answer}} from a depth run. C1 asked
+    each frame on its own; its key-frame answer is the one shown, as on the old
+    depth page. No per-video summary (owner, 2026-10-29: "deepest water" was
+    removed); a video's depth is its shots' answers."""
     shots: dict[str, dict[int, dict]] = {}
-    labels: dict[str, dict] = {}
     for item in depth_catalog.get("items") or []:
         per = shots.setdefault(item["video_id"], {})
         for s in item["shots"]:
             c1 = s.get("C1")
             per[s["s"]] = {"C1": c1[DEPTH_KEY_FRAME] if isinstance(c1, list) and len(c1) > DEPTH_KEY_FRAME else c1,
                            **{c: s.get(c) for c in DEPTH_CONDS[1:]}}
-        labels[item["video_id"]] = {c: item["label"][c].get("deepest") for c in DEPTH_CONDS}
-    return shots, labels
+    return shots
 
 
 def load_flood_video_catalog(shot_catalog: dict, depth_catalog: dict, videos_by_id: dict) -> dict:
     """The Videos tab: one item per valid flood video (is_valid_flood), its
     shots from the scan and, where the depth run covered a shot, that shot's
     answer under each condition."""
-    depth_shots, depth_labels = depth_by_shot(depth_catalog)
+    depth_shots = depth_by_shot(depth_catalog)
     items = []
     for item in shot_catalog["items"]:
         if not is_valid_flood(item):
@@ -435,7 +434,7 @@ def load_flood_video_catalog(shot_catalog: dict, depth_catalog: dict, videos_by_
         shots = [{**shot, "depth": per.get(k + 1)} for k, shot in enumerate(item["shots"])]
         items.append({**item, "shots": shots,
                       "description": videos_by_id.get(vid, {}).get("description", ""),
-                      "depth_label": depth_labels.get(vid)})
+                      "n_depth": sum(1 for s in shots if s["depth"])})
     items.sort(key=lambda i: i["published"] or "", reverse=True)
     locations = Counter(i["location"] for i in items)
     return {
@@ -448,7 +447,7 @@ def load_flood_video_catalog(shot_catalog: dict, depth_catalog: dict, videos_by_
             "scanned": shot_catalog["summary"]["videos"],
             "flood_shots": sum(i["n_flood"] for i in items),
             "flood_hours": round(sum(i["flood_s"] for i in items) / 3600, 2),
-            "with_depth": sum(1 for i in items if i["depth_label"]),
+            "with_depth": sum(1 for i in items if i["n_depth"]),
             "nyc": locations["nyc"],
             "ny_not_nyc": locations["ny"],
             "outside_ny": locations["outside"],

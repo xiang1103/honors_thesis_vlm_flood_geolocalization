@@ -28,7 +28,7 @@ from pathlib import Path
 import conditions
 from conditions import (BOX_COLOURS, BOXES_INTRO, MULTI_INTRO, NO_BOXES, QUESTION, SINGLE_INTRO,
                         heights_block, prompt_id, text_block)
-from levels import REFERENCE_HEIGHTS, midpoint_cm
+from levels import REFERENCE_HEIGHTS
 
 PROJECT = Path(__file__).resolve().parents[2]
 VIDEOS_FILE = PROJECT / "data" / "youtube_videos.json"
@@ -207,13 +207,8 @@ def query(catalog: dict, params: dict[str, str]) -> dict:
         return True
 
     items = [i for i in catalog["items"] if keep(i)]
-    order = params.get("sort", "deep")
-    if order in ("deep", "shallow"):
-        def depth(i):
-            d = midpoint_cm(i["label"][cond]["deepest"])
-            return (d is None, -(d or 0) if order == "deep" else (d or 0))
-        items.sort(key=depth)                                   # unanswered last
-    elif order == "spread":
+    order = params.get("sort", "newest")
+    if order == "spread":
         items.sort(key=spread, reverse=True)
     elif order == "shots":
         items.sort(key=lambda i: len(i["shots"]), reverse=True)

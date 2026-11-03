@@ -11,17 +11,14 @@ model nothing -- and writes <run dir>/video_labels.json:
        "<video_id>": {
          "shots": [{"s": 9, "t": [38.33, 43.63],
                     "C1": ["35-40 cm", "35-40 cm", "40-45 cm"], "C2": "35-40 cm", ...}, ...],
-         "label": {"C1": {"deepest": "40-45 cm", "deepest_shot": 9, "median_cm": 37.5,
-                          "answered": 4, "x": 1}, "C2": {...}, ...}}}}
+         "label": {"C1": {"median_cm": 37.5, "answered": 4, "x": 1}, "C2": {...}, ...}}}}
 
   s / t        shot number (as in the frame files) and its [start, end] in
                seconds -- play it with embed_url?start=<int(start)>&end=<ceil(end)>
   C1           the 3 frames' answers (key frame = index 1); C2-C5 one answer each
-  label        per condition, over the video's shots (C1: key-frame answers):
-    deepest      the deepest answer -- the scale measures depth "at the deepest
-                 place where it can be judged", so a video's label is its
-                 deepest shot, not an average
-    deepest_shot which shot that was
+  label        per condition, over the video's shots (C1: key-frame answers).
+               No "deepest" answer (owner, 2026-10-29: removed from computing
+               and display -- one misjudged shot decided the whole video):
     median_cm    median of the answers' midpoints (cm runs only; null otherwise)
     median_level median level (L0-L5 runs only)
     answered / x shots with a numeric answer / shots answered X; nulls are neither
@@ -73,11 +70,7 @@ def summarise(shots: list[dict], cond: str, kind: str) -> dict:
     answers = [(s["s"], s[cond][KEY_FRAME] if cond == "C1" else s[cond]) for s in shots]
     scored = [(depth_key(a, kind), n, a) for n, a in answers]
     numeric = [(d, n, a) for d, n, a in scored if d is not None]
-    out = {"deepest": None, "deepest_shot": None, "answered": len(numeric),
-           "x": sum(a == UNKNOWN for _, a in answers)}
-    if numeric:
-        d, n, a = max(numeric, key=lambda x: (x[0], -x[1]))
-        out.update(deepest=a, deepest_shot=n)
+    out = {"answered": len(numeric), "x": sum(a == UNKNOWN for _, a in answers)}
     if kind == "cm":
         out["median_cm"] = round(statistics.median(d for d, _, _ in numeric), 1) if numeric else None
     else:

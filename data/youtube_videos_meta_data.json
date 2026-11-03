@@ -1,70 +1,70 @@
 {
-  "generated_at": "2026-10-25T07:51:27+00:00",
+  "generated_at": "2026-11-01T09:09:00+00:00",
   "source_file": "data/youtube_videos.json",
   "note": "One row per YouTube video; no video bytes are stored, only metadata and i.ytimg.com thumbnails. flood_text_score is the text signal only (the video is ABOUT a flood); flood_visual is the VLM over thumbnails (flooding is VISIBLE). in_ny / in_nyc are null when unknown, which is not the same as false.",
   "all": {
-    "videos": 19276,
-    "thumbnails": 76875,
-    "hours": 3914.5,
+    "videos": 20193,
+    "thumbnails": 80532,
+    "hours": 4352.5,
     "earliest": "2006-08-25",
-    "latest": "2026-10-25"
+    "latest": "2026-11-01"
   },
   "available": {
-    "videos": 19215,
-    "thumbnails": 76631,
-    "hours": 3860.9,
+    "videos": 20085,
+    "thumbnails": 80103,
+    "hours": 4275.6,
     "earliest": "2006-08-25",
-    "latest": "2026-10-25"
+    "latest": "2026-11-01"
   },
   "flood_text_score": {
-    "0.0-0.2": 9405,
-    "0.2-0.4": 1184,
-    "0.4-0.6": 3354,
-    "0.6-0.8": 3215,
-    "0.8-1.0": 2118
+    "0.0-0.2": 10021,
+    "0.2-0.4": 1218,
+    "0.4-0.6": 3449,
+    "0.6-0.8": 3328,
+    "0.8-1.0": 2177
   },
-  "flood_text_relevant": 9408,
+  "flood_text_relevant": 9694,
   "flood_text_threshold": 0.3,
   "flood_visual": {
-    "classified": 19276,
-    "flood_visible": 8108,
-    "no_flood_visible": 11155,
-    "undecidable": 13
+    "classified": 20193,
+    "flood_visible": 8360,
+    "no_flood_visible": 11819,
+    "undecidable": 14
   },
-  "ai_by_text": 205,
+  "ai_by_text": 231,
   "in_ny": {
-    "true": 12580,
-    "false": 3418,
-    "unknown": 3278
+    "true": 13007,
+    "false": 3692,
+    "unknown": 3494
   },
   "in_nyc": {
-    "true": 6738,
-    "false": 7629,
-    "unknown": 4909
+    "true": 6973,
+    "false": 8034,
+    "unknown": 5186
   },
-  "with_coordinates": 3998,
+  "with_coordinates": 4161,
   "thumbnails_without_digest": 0,
   "by_year": {
     "2006": 2,
-    "2007": 16,
+    "2007": 17,
     "2008": 31,
-    "2009": 77,
-    "2010": 77,
-    "2011": 770,
-    "2012": 817,
-    "2013": 166,
-    "2014": 275,
-    "2015": 237,
-    "2016": 223,
-    "2017": 436,
-    "2018": 437,
-    "2019": 452,
-    "2020": 448,
-    "2021": 1435,
-    "2022": 1167,
-    "2023": 2921,
-    "2024": 1687,
-    "2025": 2304,
-    "2026": 5298
+    "2009": 85,
+    "2010": 82,
+    "2011": 785,
+    "2012": 835,
+    "2013": 169,
+    "2014": 284,
+    "2015": 245,
+    "2016": 233,
+    "2017": 450,
+    "2018": 455,
+    "2019": 465,
+    "2020": 470,
+    "2021": 1452,
+    "2022": 1203,
+    "2023": 2985,
+    "2024": 1756,
+    "2025": 2401,
+    "2026": 5788
   }
 }
