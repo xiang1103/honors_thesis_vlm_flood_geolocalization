@@ -1,6 +1,6 @@
 # Water depth from geometry + segmentation
 
-Status: **pilot run** (2026-10-29), code in
+Status: **pilot run** (2026-10-29) and **dry-scene calibration** (2026-11-03), code in
 `flood_depth_experiments/depth_detection/`; results under "Pilot results" below. A non-VLM depth estimate for flood
 shots, to be measured on its own first and then, if it holds up, given to the
 VLM as extra context (a new condition, C7). It extends the water-depth benchmark
@@ -169,8 +169,8 @@ Per shot: the 3 frames' depths, their median, and their spread.
 
 ## Segmentation backend actually used
 
-`facebook/sam3` is gated on Hugging Face and the account behind `HF_TOKEN` is
-not approved (403, 2026-10-29). The pilot uses option 2, **Grounding DINO base
+`facebook/sam3` was gated on Hugging Face until 2026-11-03, when access was
+granted; the calibration uses it. The flood pilot (2026-10-29) used option 2, **Grounding DINO base
 (local) + SAM 2.1 hiera-large**, one detector query per class. `segment.py` has
 both backends; `--segmenter sam3` switches once access is granted at
 https://huggingface.co/facebook/sam3. Overlaps resolve objects > water > ground
@@ -229,6 +229,8 @@ When the geometry abstains, C7b says so rather than omitting the line.
 - `segment.py` -- the masks (gdino-sam2 or sam3), with a config id.
 - `geometry_depth.py` -- MoGe-2, plane, gravity, waterline, routes A and B,
   overlays, summary. `--summary` re-scores stored numbers without a GPU.
+- `calibrate_dry.py` -- measures known-size objects on dry scenes (see
+  "Dry-scene calibration"); `--summary` likewise.
 
 MoGe is installed in `newEnv_local` as `moge` 3.0.0 + `utils3d_moge`, both
 `--no-deps` (its full dependency list pulls gradio and a CUDA-compiled
@@ -288,20 +290,97 @@ Within-shot spread could not be compared with the VLM: no shot was answered on
 all 3 frames. The go / no-go question is therefore not answered yet; the
 measured finding is that **route A covers ~1% of random flood frames**.
 
+## Dry-scene calibration (2026-11-03)
+
+Question: can SAM 3 + MoGe-2 measure objects of known size correctly? Tested
+on dry street scenes, where every reference is fully visible, so measured /
+nominal is the error route B would carry into a flood frame. No labels needed.
+
+Run: `calibrate_dry.py --n 0`, the key frame of one random NON-flood shot per
+video: 3,073 frames, 1,193 skipped because SAM 3 found flood water anyway, 539
+with at least one reference, 0.47 s per frame. Outputs in
+`scrape_data/experiments/flood_depth/geometry/calibration/` (`summary.json`,
+`sheet_<class>.jpg` crops sorted by measured / nominal, `crops/`).
+
+Detected and kept by the shape checks:
+
+| reference | detected | kept | main rejections |
+|---|---|---|---|
+| wheel | 1,702 | 1,034 | 408 not on a car mask, 136 too small, 119 too thin |
+| license plate | 386 | 273 | 69 wrong aspect, 44 too small |
+| curb | 331 | 331 | (no check) |
+| stop sign | 54 | 38 | 15 not square |
+| fire hydrant | 24 | 19 | 5 wider than tall |
+
+**Finding 1: MoGe's scale breaks on composite and through-glass frames.**
+Objects MoGe placed under 5 m measured at 8-25% of their real size (wheels: 141
+instances in 71 videos, median 0.09). The frames: TV studio screens,
+picture-in-picture, filming through a windscreen or window, phones held up to
+the camera. MoGe anchors its scale on the glass, the frame or the presenter,
+and shrinks everything behind it. The few genuine close-ups among them (a van,
+a car in a garage) measured 0.90-0.93. The same scene filter the flood pilot
+called for would remove most of these; until it exists, the numbers below
+use objects at >= 10 m from the camera as a stand-in.
+
+**Finding 2: on real street scenes the sizes are roughly right but loose**
+(measured / nominal, objects >= 10 m away, shape checks passed):
+
+| measure | n | median | IQR | within 10% | within 20% |
+|---|---|---|---|---|---|
+| license plate width, 2d | 219 | 1.09 | 0.42 | 32% | 54% |
+| license plate height, 3d | 219 | 1.07 | 0.37 | 31% | 54% |
+| wheel diameter, ellipse | 777 | 0.77 | 0.37 | 22% | 40% |
+| wheel diameter, 2d | 777 | 0.76 | 0.43 | 21% | 42% |
+| wheel diameter, 3d | 777 | 0.65 | 0.40 | 11% | 28% |
+| wheel hub above road plane | 759 | 0.67 | 0.67 | 11% | 23% |
+| stop sign width, 2d | 28 | 0.83 | 0.53 | 25% | 32% |
+| fire hydrant height, 3d | 14 | 0.74 | 0.70 | 14% | 29% |
+| curb height, 3d | 222 | 3.25 | 5.96 | 5% | 9% |
+
+- **MoGe's metric scale is about right on real scenes.** License plates are
+  flat, standard (30.5 x 15.2 cm in the US) and fully visible, so they test the
+  scale more than the masks: median 1.07-1.09, i.e. MoGe's distances are within
+  ~10% on average.
+- **Wheels read ~23% small**, consistently across methods. Plates being right
+  points at the masks, not MoGe. The crop sheet shows why: most wheels are 5-10
+  px across at 320 px; masks catch the dark lower part of the tyre, and oblique
+  or partly hidden wheels come out as slivers.
+- **Spread is the real problem.** An IQR of 0.37 on a 66 cm wheel is ~24 cm;
+  only 40% of wheels land within 20% (13 cm). Depth = known size − visible
+  height inherits that, before adding the waterline's own error. That is no
+  more precise than the VLM (C1's median within-shot spread is ~10 cm on the
+  pilot's shots).
+- **2d beats 3d.** Pixel extent x (distance / focal) is better than the extent
+  of the object's own 3D points, which bleed into the background at the edges
+  (worst for stop signs, which stand against the sky: 3d median 8.6).
+- **Hub height above the road plane is unusable** (median 0.67, IQR 0.67):
+  the plane extended out to a car 20+ m away is off by tens of centimetres.
+- **Curbs as masked are unusable**: the "curb" mask includes the curb's top
+  and the sidewalk edge, so its vertical extent is mostly the ground receding.
+
+**Verdict.** At 320 px, route B is limited by resolution, not by the idea:
+the references are there, and MoGe's scale holds on real scenes, but the
+objects are too few pixels for a centimetre-level measurement. Route B
+(and route A) should be re-tested on native-resolution frames once YouTube
+downloads work again; the calibration is a one-command rerun on them.
+
 ## Next
 
-1. **Route B done properly**, since that is where the contacts are: wheel masks
-   checked for shape (roughly round, small relative to the car), the car body as
-   a second known-size reference (sill ~25 cm, bonnet ~90 cm), people later.
-   Measure its self-consistency on the 27 frames with contacts.
-2. **SAM 3** once access is granted; compare water masks on the same 150 frames
-   (does it stop swallowing dry road?).
-3. **A scene filter** in front of any depth method: drop broadcast graphics,
-   split screens, picture-in-picture, close-ups (a cheap VLM or CLIP question).
-   Report coverage on real street scenes separately from all flood shots.
-4. A hand-picked pilot of shots that DO show dry ground, to test whether route A
-   is accurate where it applies (the random pilot only measured how often it applies).
-5. Only then: C7a / C7b in `run_conditions.py`, and the STN high-water-mark
+1. **Scene filter first** (both runs point here): drop broadcast graphics,
+   picture-in-picture, split screens, through-windscreen / window shots, and
+   close-ups, before ANY depth method. A cheap VLM or CLIP question on the key
+   frame. Re-score both runs on what survives.
+2. **Native-resolution frames.** The calibration says resolution is the
+   bottleneck for route B; rerun `calibrate_dry.py` on full-size frames when
+   downloads work. If wheels then land within ~10%, build route B on the flood
+   frames with contacts.
+3. **Wheel bias**: if the -23% survives at native resolution, correct it
+   with the measured ratio or fit the ellipse to the rim edge, not the mask.
+4. Rerun the flood pilot with SAM 3 (`--segmenter sam3`) and compare water
+   masks on the same 150 frames.
+5. A hand-picked pilot of shots that DO show dry ground, to test route A's
+   accuracy where it applies.
+6. Only then: C7a / C7b in `run_conditions.py`, and the STN high-water-mark
    subset for accuracy.
 
 ## Open questions

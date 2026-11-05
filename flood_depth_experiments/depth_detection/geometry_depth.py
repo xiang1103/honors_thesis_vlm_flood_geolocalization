@@ -42,6 +42,11 @@ Output (experiment only, nothing in data/):
     python3 flood_depth_experiments/depth_detection/geometry_depth.py --limit 2      # smoke test
     python3 flood_depth_experiments/depth_detection/geometry_depth.py --summary      # re-score, no GPU
     python3 flood_depth_experiments/depth_detection/geometry_depth.py --segmenter sam3   # once access is granted
+
+Scene filter: shots that scene_split/scene_filter.py labels as studio, screen,
+picture-in-picture, through-glass or graphic are left out of the run and the
+summary (MoGe's scale breaks on them). Their stored rows are kept; --scene all
+puts them back.
 """
 from __future__ import annotations
 
@@ -73,6 +78,7 @@ sys.path.insert(0, str(PROJECT / "scraping" / "api_based_scraping"))
 from levels import midpoint_cm  # noqa: E402
 from sample_items import FRAMES_DIR, FRAMES_PER_SHOT, OUT_DIR as DEPTH_DIR, eligible, select  # noqa: E402
 from scan_shots import LEDGER_DIR, read_ledger  # noqa: E402
+from scene_filter import skip_ids  # noqa: E402
 from segment import segmenter_id  # noqa: E402
 
 OUT_DIR = DEPTH_DIR / "geometry"
@@ -338,6 +344,15 @@ def overlay(rgb: np.ndarray, masks, draw: dict, s: dict, scale: int = 2) -> np.n
 # run
 # --------------------------------------------------------------------------
 
+def scene_kept(shots: list[dict], scene: str) -> tuple[list[dict], int]:
+    """Shots the scene filter keeps (all of them with scene='all'), and how many it left out."""
+    if scene == "all":
+        return shots, 0
+    skip = skip_ids()
+    kept = [s for s in shots if s["id"] not in skip]
+    return kept, len(shots) - len(kept)
+
+
 def choose_shots(n: int, seed: int) -> list[dict]:
     path = OUT_DIR / "shots.jsonl"
     if path.exists():
@@ -379,7 +394,7 @@ def run(args) -> None:
     from segment import Segmenter
 
     cfg = config_id(args.segmenter)
-    shots = choose_shots(args.n, args.seed)
+    shots, _ = scene_kept(choose_shots(args.n, args.seed), args.scene)
     done = read_frames(cfg)
     todo = [s for s in shots if any((s["id"], j) not in done for j in range(FRAMES_PER_SHOT))]
     if args.limit:
@@ -462,10 +477,11 @@ def read_vlm() -> dict[str, dict]:
     return out
 
 
-def summary(segmenter: str) -> dict:
+def summary(segmenter: str, scene: str = "real") -> dict:
     from collections import Counter
     cfg = config_id(segmenter)
     shots = choose_shots(0, 0) if (OUT_DIR / "shots.jsonl").exists() else []
+    shots, scene_skipped = scene_kept(shots, scene)
     frames = read_frames(cfg)
     vlm = read_vlm()
     reasons, basis = Counter(), Counter()
@@ -514,6 +530,7 @@ def summary(segmenter: str) -> dict:
     res = {
         "config": cfg, "segmenter": segmenter_id(segmenter), "moge": MOGE_ID,
         "generated_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+        "scene_filter": scene, "shots_skipped_by_scene": scene_skipped,
         "shots": len(per_shot), "frames": n_frames,
         "frames_answered": reasons.get("answered", 0),
         "shots_with_answer": sum(1 for p in per_shot if p["geo_cm"] is not None),
@@ -549,10 +566,12 @@ def main() -> int:
     ap.add_argument("--device", default="free", help="'free' = GPU with the most free memory, or cuda:N")
     ap.add_argument("--limit", type=int, default=None, help="only this many shots (smoke test)")
     ap.add_argument("--summary", action="store_true", help="only re-score stored frames, no GPU")
+    ap.add_argument("--scene", default="real", choices=["real", "all"],
+                    help="real = leave out shots the scene filter flags (default); all = every shot")
     args = ap.parse_args()
     if not args.summary:
         run(args)
-    res = summary(args.segmenter)
+    res = summary(args.segmenter, args.scene)
     print(json.dumps({k: v for k, v in res.items() if k != "per_shot"}, indent=1))
     return 0
 

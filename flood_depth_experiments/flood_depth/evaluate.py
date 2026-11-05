@@ -26,6 +26,11 @@ With legacy labels (items whose gold label is a level, L0-L5):
     python3 flood_depth_experiments/flood_depth/evaluate.py --split-scheme video_hash --split test
     python3 flood_depth_experiments/flood_depth/evaluate.py --annotator alice      # one annotator as gold
     python3 flood_depth_experiments/flood_depth/evaluate.py --full     # run_all.py's compact answers, every shot
+    python3 flood_depth_experiments/flood_depth/evaluate.py --scene all   # include scene-filtered shots
+
+Scene filter (scene_split/scene_filter.py): shots labelled studio, screen,
+picture-in-picture, through-glass or graphic are left out of the scores by
+default. Their answers stay on disk; unlabelled shots are kept.
 """
 from __future__ import annotations
 
@@ -41,6 +46,7 @@ from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
+sys.path.insert(0, str(HERE.parent / "scene_split"))
 from levels import ANSWERS, ORDINAL, UNKNOWN, interval_cm, level_index, parse_depth_range, within_5cm  # noqa: E402
 from run_conditions import read_predictions  # noqa: E402
 from sample_items import OUT_DIR, read_items  # noqa: E402
@@ -199,6 +205,8 @@ def main() -> int:
     ap.add_argument("--split", default=None, help="score only this split (e.g. test)")
     ap.add_argument("--full", action="store_true", help="score run_all.py's compact answers (every shot)")
     ap.add_argument("--full-dir", type=Path, default=OUT_DIR / "full")
+    ap.add_argument("--scene", default="real", choices=["real", "all"],
+                    help="real = leave out shots the scene filter flags (default); all = every shot")
     args = ap.parse_args()
 
     if args.full:
@@ -209,6 +217,12 @@ def main() -> int:
     split_of = splits.assign(items, args.split_scheme, tuple(float(x) for x in args.split_ratios.split(",")))
     if args.split:
         items = [it for it in items if split_of[it["item_id"]] == args.split]
+    scene_skipped = 0
+    if args.scene == "real":
+        from scene_filter import skip_ids
+        skip = skip_ids()
+        scene_skipped = sum(1 for it in items if it["item_id"] in skip)
+        items = [it for it in items if it["item_id"] not in skip]
     item_ids = {it["item_id"] for it in items}
     key_frames = {it["item_id"]: it["key_frame"] for it in items}
     preds = [p for p in all_preds if p["item_id"] in item_ids]
@@ -228,8 +242,10 @@ def main() -> int:
 
     report: dict = {"generated_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
                     "items": len(items), "split_scheme": args.split_scheme, "split": args.split,
+                    "scene_filter": args.scene, "items_skipped_by_scene": scene_skipped,
                     "labelled_items": len(gold_levels), "annotator": args.annotator, "systems": {}}
-    print(f"{len(items)} items{f' (split {args.split})' if args.split else ''}, "
+    print(f"{len(items)} items{f' (split {args.split})' if args.split else ''}"
+          f"{f', {scene_skipped} left out by the scene filter' if scene_skipped else ''}, "
           f"{len(gold_levels)} labelled, {len(systems)} systems")
 
     for name in sorted(systems):

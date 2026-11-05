@@ -104,19 +104,30 @@ class Segmenter:
         return self._box_masks(image, boxes), labels
 
     # -- sam3 ---------------------------------------------------------------
+    def instances(self, image, phrases: list[str],
+                  threshold: float = SAM3_THRESHOLD) -> list[tuple[str, float, np.ndarray]]:
+        """SAM 3 only: every instance of every phrase as (phrase, score, mask).
+        The image is encoded once and reused for all phrases."""
+        if self.backend != "sam3":
+            raise ValueError("instances() needs the sam3 backend")
+        img = self.sam_proc(images=image, return_tensors="pt").to(self.device)
+        sizes = img["original_sizes"].tolist()
+        out_list = []
+        with self.torch.inference_mode():
+            vision = self.sam.get_vision_features(pixel_values=img["pixel_values"])
+            for phrase in phrases:
+                text = self.sam_proc(text=phrase, return_tensors="pt").to(self.device)
+                out = self.sam(vision_embeds=vision, input_ids=text["input_ids"],
+                               attention_mask=text.get("attention_mask"))
+                r = self.sam_proc.post_process_instance_segmentation(
+                    out, threshold=threshold, mask_threshold=0.5, target_sizes=sizes)[0]
+                for score, m in list(zip(r["scores"].tolist(), r["masks"]))[:MAX_BOXES]:
+                    out_list.append((phrase, round(score, 3), m.cpu().numpy().astype(bool)))
+        return out_list
+
     def _class_sam3(self, image, query: str) -> tuple[list[np.ndarray], list[str]]:
-        masks, labels = [], []
-        for phrase in [p.strip() for p in query.split(".") if p.strip()]:
-            inputs = self.sam_proc(images=image, text=phrase, return_tensors="pt").to(self.device)
-            with self.torch.inference_mode():
-                out = self.sam(**inputs)
-            r = self.sam_proc.post_process_instance_segmentation(
-                out, threshold=SAM3_THRESHOLD, mask_threshold=0.5,
-                target_sizes=inputs.get("original_sizes").tolist())[0]
-            for m in r["masks"][:MAX_BOXES]:
-                masks.append(m.cpu().numpy().astype(bool))
-                labels.append(phrase)
-        return masks, labels
+        found = self.instances(image, [p.strip() for p in query.split(".") if p.strip()])
+        return [m for _, _, m in found], [p for p, _, _ in found]
 
     def __call__(self, image) -> Masks:
         h, w = image.height, image.width
