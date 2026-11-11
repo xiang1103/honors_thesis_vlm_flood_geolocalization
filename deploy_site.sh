@@ -21,6 +21,8 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "$0")" && pwd)"
 cd "$ROOT"
 PY=/home/liu47/conda_envs/newEnv_local/bin/python3
+# cron runs with PATH=/usr/bin:/bin; rclone is installed in ~/.local/bin
+export PATH="$HOME/.local/bin:$PATH"
 # Last Vercel CLI that runs on this machine's Node 18 (61.0.0 needs Node 20).
 VERCEL_CLI=vercel@60.1.3
 LOG=scrape_data/logs/deploy-site.log

@@ -473,6 +473,12 @@ then scanned 211 videos until a bot check at 08:52 and 121 more after the
 14:52 probe until another at 15:52 -- the Oct 15-17 pattern of short bot-check
 blocks is back, the 403 is gone.
 
+**Since then (checked 2026-11-10):** the cron scans of 2026-11-01 (131 videos,
+523 flood shots) and 2026-11-08 (121, 364) hit no block. Their later steps did
+fail, for a non-YouTube reason: cron's bare environment (no `$USER`, no
+`~/.local/bin` on PATH) broke `run_new.sh` and `deploy_site.sh` -- fixed, see
+the root CLAUDE.md under the weekly cron.
+
 **Proxy fallback (owner, 2026-10-24): proxy AND wait.** `YTDLP_PROXY` (env,
 else `.env`; template in `.env.example`) is any yt-dlp proxy URL. Each process
 downloads DIRECT first; the first video refused there (stream 403 after its 3

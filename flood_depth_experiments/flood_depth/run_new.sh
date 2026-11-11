@@ -24,7 +24,7 @@ mkdir -p scrape_data/logs
 exec >>"$LOG" 2>&1
 exec 9>scrape_data/experiments/flood_depth/.run_new.lock
 flock -n 9 || { echo "$(date -Is) another run_new.sh is running; exiting"; exit 1; }
-if pgrep -u "$USER" -f "$RUN --shard" > /dev/null; then
+if pgrep -u "$(id -un)" -f "$RUN --shard" > /dev/null; then
     echo "$(date -Is) run_all.py shards already running (run_all.sh by hand?); exiting"
     exit 1
 fi

@@ -423,11 +423,13 @@ not stop the later ones; one line per step in `scrape_data/logs/youtube-weekly.l
    scans flood videos (<= 300 s) not yet in `scrape_data/youtube_shot_scan/`; if
    YouTube blocks downloads it stops and the next try is next week (run by hand
    without `BLOCK_WAIT_S=0`, it waits out blocks, probing every 2 h). Own lock.
-   Log `scrape_data/logs/shot-scan.log`. As of 2026-10-24 YouTube refuses every media
-stream (403) from this server's IP (confirmed: the same download works from another
+   Log `scrape_data/logs/shot-scan.log`. On 2026-10-24 YouTube refused every media
+stream (403) from this server's IP (confirmed: the same download worked from another
 network), even with the PO-token provider installed
-(`bgutil-ytdlp-pot-provider`, Deno script mode, repo at `~/bgutil-ytdlp-pot-provider`),
-so step 3 currently scans nothing. A proxy fallback exists (`YTDLP_PROXY` in `.env`,
+(`bgutil-ytdlp-pot-provider`, Deno script mode, repo at `~/bgutil-ytdlp-pot-provider`).
+The block was temporary: downloads worked again from 2026-10-25 (short bot-check
+blocks since), and the cron scans of 2026-11-01 (131 videos) and 2026-11-08 (121)
+ran with no block. It can recur -- same IP. A proxy fallback exists (`YTDLP_PROXY` in `.env`,
 used only after the direct route is refused; unset as of 2026-10-24); see "Nightly
 from cron", "PO-token provider" and "Proxy fallback" in `scraping/video_scraping/CLAUDE.md`.
 4. water depth, `flood_depth_experiments/flood_depth/run_new.sh` -- C1-C5 answers
@@ -437,6 +439,15 @@ from cron", "PO-token provider" and "Proxy fallback" in `scraping/video_scraping
    waits for every shard. Own lock. Log `scrape_data/logs/flood-depth-weekly.log`.
    Added 2026-10-26: until then `full_5cm` was a one-off (2026-10-21, 9,910 shots
    / 1,928 videos) and every later video showed no depth.
+
+**Cron's bare environment broke steps 4 and 5 on 2026-11-01 and 11-08** (fixed
+2026-11-10). Cron sets no `$USER` and `PATH=/usr/bin:/bin`: `run_new.sh` died on
+`pgrep -u "$USER"` under `set -u` (now `$(id -un)`), and `deploy_site.sh` could not
+find `rclone` in `~/.local/bin` (it now prepends that to PATH). So the ~890 flood
+shots of those two scans had no depth and the public site was not updated; a
+catch-up (depth, then deploy) was run by hand 2026-11-10. When adding a step, test
+it under `env -i HOME=$HOME PATH=/usr/bin:/bin`; a step's exit code is in
+`scrape_data/logs/youtube-weekly.log` -- check it, a failed step does not stop the chain.
 MyCoast update: `./scraping/update_mycoast.sh` (scrape -> dedupe -> metadata -> gis refresh,
 stops on first failure, log in `scrape_data/logs/mycoast-update_latest.log`).
 
