@@ -313,7 +313,8 @@ flood_depth_experiments/ scene_split/ (shot detection + per-shot flood scan,
                   scene_filter.py: direct view vs studio/screen/through-glass labels),
                   flood_depth/ (water-depth benchmark, PLAN.md),
                   depth_detection/ (geometry depth: MoGe-2 + segmentation, design in
-                  docs/water_depth_segmentation.md)
+                  docs/water_depth_segmentation.md). Each has a CLAUDE.md
+                  (flood_depth_experiments/CLAUDE.md first).
 image_review_web/  + image_review_server.py   news review site (human + model)  :8765
 data_view_web/    + data_view_server.py     data_view, read-only, two tabs    :8768
                                                /: MyCoast photos (app.js)

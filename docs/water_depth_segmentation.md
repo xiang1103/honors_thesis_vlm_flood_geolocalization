@@ -1,7 +1,10 @@
 # Water depth from geometry + segmentation
 
-Status: **pilot run** (2026-10-29) and **dry-scene calibration** (2026-11-03), code in
-`flood_depth_experiments/depth_detection/`; results under "Pilot results" below. A non-VLM depth estimate for flood
+Status: **pilot run** (2026-10-29), **dry-scene calibration** (2026-11-03), scene
+filter and routes A / B / V (2026-11-04 to 11-05), code in
+`flood_depth_experiments/depth_detection/`. **Start with "Where routes A and B
+stand"** below -- the summary of what works and what does not; the dated
+sections after it are the measurements it rests on. A non-VLM depth estimate for flood
 shots, to be measured on its own first and then, if it holds up, given to the
 VLM as extra context (a new condition, C7). It extends the water-depth benchmark
 in `flood_depth_experiments/flood_depth/PLAN.md` (read that first; this is its
@@ -263,6 +266,135 @@ scrape_data/experiments/flood_depth/geometry/
 
 Ids match the shot-scan ledger and `full_5cm/`, so results join with the VLM
 answers. Point maps are not stored (large, recomputable).
+
+## Where routes A and B stand (2026-11-10)
+
+A summary of everything measured so far (50-shot pilot, 46 shots / 138 frames
+after the scene filter, frames 320 x 180 px, config `geo:299e6b18`, VLM sizes
+prompt `objsize:f97f4307`). **No answer has been checked against ground
+truth**; "works" below means the method runs, answers, and is self-consistent
+or agrees with independent knowledge -- not that it is right. Every answer is
+on `geometry/report.html` for people who know flooding to judge.
+
+| | route A (plane) | route B (table size) | route V (VLM size) |
+|---|---|---|---|
+| depth = | water level - dry-ground plane, along gravity | table height of an object in water - its visible height | VLM's height of the object - its visible height |
+| needs | visible dry ground + a waterline on objects | an object of known size standing in water, top visible | an object standing in water, top visible |
+| frames answered (of 138) | 6 | 23 | 27 |
+| shots with an answer (of 46) | 5 | 12 | 18 |
+| shots answered on all 3 frames | 0 | 3 | 3 |
+| within-shot spread, median (VLM C1, same shots) | -- | 13.6 cm (5.0) | 28.1 cm (10.0) |
+| main reason for no answer | no dry ground (67), water touches only ground (27), ground not flat (18) | no reference object in water (68), not a table object (14), objects disagree (8) | no reference object in water (68), objects disagree (24) |
+
+Where two routes answer the same frame: B vs V 9 frames, median |diff| 15 cm;
+A vs B 4 frames, median |diff| 58 cm.
+
+### Route A: what works
+
+- **The geometry runs on every frame** and every intermediate is stored
+  (plane, gravity basis, contacts, shore, level and its IQR), so thresholds
+  change without a GPU (`--summary`).
+- **It needs no assumed size.** Where it applies it is the only route that
+  measures depth from the scene itself.
+- **It has built-in self-checks**: water is level, so the contact and shore
+  heights must agree (`level_iqr_cm`, `level_gap_cm`), and the ground plane
+  must fit (`plane_resid_cm`). These catch bad frames rather than guess.
+- **SAM 3 helped**: dry ground found went from 0.1% to 2.1% of the frame
+  (median), answering frames from 2 to 5-6.
+- A few answers look plausible against the VLM and the overlays (e.g.
+  `G91_dMVieV8:shot025` 25-26 cm under the old segmenter, VLM 30-35 cm;
+  `OAZKqcG2HTU:shot002` 6.9 cm at a hydrant).
+
+### Route A: what does not work
+
+- **Coverage is ~4% of frames, and that is structural.** Typical YouTube flood
+  footage shows no dry ground: the road is under water from edge to edge, or
+  the camera is in the water. 67 of 138 frames have no dry ground to fit; 27
+  more have water meeting only ground, no object to put a waterline on. Better
+  segmentation cannot create ground that is not in view.
+- **The extended plane is the weak link.** The plane is fitted on whatever dry
+  ground is visible -- lawns, a sloped driveway, a bank -- and extended under
+  the water. 18 frames fail the flatness check; the calibration measured
+  wheel-hub height above the plane at 0.67 x true with IQR 0.67, i.e. the plane
+  extended to 20+ m is off by tens of centimetres. `E7knsQuTRLo:shot006` gave
+  197 cm because the "ground" was a river bank.
+- **The level constraint is usually violated.** Contact and shore heights
+  differ by a median of 25 cm; water cannot do that, so the water mask, the
+  contacts or the depth map is off in most frames. This gap is not yet an
+  abstain rule (open).
+- **No shot answered on all 3 frames**, so its consistency cannot be measured.
+
+### Route B (table sizes): what works
+
+- **3-4x route A's coverage** (23 frames, 12 shots), and it needs no ground
+  plane, no gravity and no frame-wide level -- each object carries its own
+  waterline.
+- **Generalised beyond wheels** (2026-11-05): any object in the 30-entry
+  `reference_sizes.json` (tyres, cars by type, buses, curbs, hydrants, cones,
+  drums, barriers, guardrails, bollards, mailboxes, bins, garage doors). 182
+  objects standing in water were found in 60 frames, against 12 frames with
+  wheels.
+- **MoGe's scale holds on real street scenes**: licence plates (flat, standard,
+  fully visible) measured 1.07-1.09 x true in the dry calibration.
+- **Objects in one frame mostly agree**: of 31 frames with usable objects, 8
+  disagreed by more than 25 cm. Example, `G91_dMVieV8:shot025` frame 1: a car
+  and two tyres gave 30-42 cm; route B answered 34 cm on all three frames
+  (33.7, 32.9, 35.3; VLM C1 30-35, 10-15, 30-35).
+- **The VLM's identification is usable when it is asked fairly**: offered the
+  whole table without the detector's word, it names common objects (car, car
+  tyre, person) consistently with its own free description.
+
+### Route B: what does not work
+
+- **Resolution.** At 320 px a wheel is 5-10 px across. The calibration read
+  wheels 0.76 x true with IQR ~0.4 (~24 cm on a 64 cm tyre); only 40% landed
+  within 20%. Depth = size - visible height inherits all of it: a visible
+  height read 23% short makes the water look that much deeper.
+- **SAM 3's word is often wrong.** Of 28 "bollard" masks the VLM called ~4
+  bollards (the rest mailboxes, boats, trash cans, hydrants, mooring posts);
+  most "door" masks were car doors or windows; "curb" masks were hydrants.
+  The phrase cannot pick the table entry by itself.
+- **The table question was anchored at first**: told the detector's word and
+  offered only its entries, the VLM confirmed the detector (9 of 15 "bollard"
+  picks were described as something else). Fixed (whole table, no word), but
+  it shows the pick is sensitive to the prompt.
+- **Less consistent than the VLM it was meant to check**: within-shot spread
+  13.6 cm vs C1's 5.0 cm on the same 3 shots.
+- **Occlusion and mask edges**: a car hidden behind another, a wheel arch, a
+  wake or reflection at the waterline all move the visible height; there is
+  no check for them beyond "top cut off by the frame" and the VLM's "top
+  visible".
+- **The table is unverified** (`checked: false` on all 30 entries) and US-only.
+
+### Route V (VLM sizes): what works and what does not
+
+- **Works**: widest coverage (27 frames, 18 shots), and it is the only route
+  for objects not in the table. Where the VLM's free answer and its table pick
+  name the same thing, its heights match the table closely: car tyres 70 vs
+  64 cm, sedans 147.5 vs 145, people 175 vs 170, small SUVs 170 vs 170.
+- **Does not work**: what the VLM thinks it is sizing is unstable. Asked
+  freely it sometimes describes a different object than the box holds -- a
+  tyre-sized mask called "car" and given 140 cm (depth 108), a heavy tyre
+  called a wheel loader and given 300 cm. Hence 24 frames with objects
+  disagreeing and a 28 cm within-shot spread. 10 of 182 answers were not
+  heights at all (runaway digits, or 1500 for a car), now discarded
+  (`MAX_VLM_SIZE_CM`). Route V also depends on the VLM, so it is not an
+  independent check on the VLM benchmark.
+
+### What would change the picture
+
+1. **Native-resolution frames.** Downloads work again (since 2026-10-25), so
+   this is now actionable: the 50 pilot videos and the calibration's videos
+   re-downloaded (transient, per the video-bytes rule) and their frames kept
+   at full size. Resolution is the main limit on route B and part of route A's.
+2. **Agreement rule for B / V**: count an object only when the VLM's free
+   answer and its table pick name the same thing (would remove most of V's
+   outliers). Not built -- it decides which answers count.
+3. **Contact-vs-shore gap as an abstain rule** for route A.
+4. **A hand-picked set of shots with dry ground** to see route A's accuracy
+   where it applies, instead of its coverage on random shots.
+5. **Some ground truth** (STN high-water marks, PLAN.md step 7) -- until then
+   every comparison here is consistency, not accuracy.
 
 ## Pilot results (2026-10-29)
 
