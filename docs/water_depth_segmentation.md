@@ -169,13 +169,12 @@ Per shot: the 3 frames' depths, their median, and their spread.
 
 ## Segmentation backend actually used
 
-`facebook/sam3` was gated on Hugging Face until 2026-11-03, when access was
-granted; the calibration uses it. The flood pilot (2026-10-29) used option 2, **Grounding DINO base
-(local) + SAM 2.1 hiera-large**, one detector query per class. `segment.py` has
-both backends; `--segmenter sam3` switches once access is granted at
-https://huggingface.co/facebook/sam3. Overlaps resolve objects > water > ground
-(a water box around a half-submerged car otherwise swallows the car, and its
-lower edge is the contact we want).
+**SAM 3 only** (`facebook/sam3`, owner's decision 2026-11-04). It was gated
+until 2026-11-03, so the first flood pilot (2026-10-29) used Grounding DINO
+base + SAM 2.1 hiera-large; that backend has since been removed from
+`segment.py` to save compute and time. Overlaps resolve objects > water >
+ground (a water mask around a half-submerged car otherwise swallows the car,
+and its lower edge is the contact we want).
 
 ## What this cannot do
 
@@ -226,11 +225,19 @@ When the geometry abstains, C7b says so rather than omitting the line.
 ## Code and outputs
 
 `flood_depth_experiments/depth_detection/`:
-- `segment.py` -- the masks (gdino-sam2 or sam3), with a config id.
-- `geometry_depth.py` -- MoGe-2, plane, gravity, waterline, routes A and B,
-  overlays, summary. `--summary` re-scores stored numbers without a GPU.
+- `segment.py` -- the masks (SAM 3), with a config id.
+- `geometry_depth.py` -- MoGe-2, plane, gravity, waterline, route A, and the geometry half of
+  routes B / V (every reference-able object standing in water, its visible height); computes
+  B and V from the stored numbers + labels; overlays, summary. `--summary` re-scores without a GPU.
+- `reference_sizes.json` -- route B's fixed size table (30 entries, top height above ground,
+  range, basis, source, SAM 3 phrases). Edit it and re-run `--summary`; no GPU rerun needed.
+- `object_sizes.py` -- the local VLM's two separate answers per object (table entry; own size).
 - `calibrate_dry.py` -- measures known-size objects on dry scenes (see
   "Dry-scene calibration"); `--summary` likewise.
+- `make_report.py` -- `geometry/report.html`: routes A, B and V per frame, the original frame
+  and the masked overlay per frame, every object with its crop, both sizes and both depths,
+  next to the VLM's C1-C5 (local only; the frames are
+  YouTube stills and are never published).
 
 MoGe is installed in `newEnv_local` as `moge` 3.0.0 + `utils3d_moge`, both
 `--no-deps` (its full dependency list pulls gradio and a CUDA-compiled
@@ -242,9 +249,16 @@ Experiment outputs only, nothing in `data/` (same rule as PLAN.md):
 scrape_data/experiments/flood_depth/geometry/
   shots.jsonl     the 50 chosen shots (written once, reused)
   frames.jsonl    one line per (shot, frame, config): every number + abstain reason
-  overlays/<video>_shotNNN.jpg   3 frames side by side; water blue, dry ground green,
-                  objects orange, contacts red, shore yellow, numbers top-left
-  summary.json    coverage, abstain reasons, spread vs C1, gap to C4/C5, per shot
+  overlays/<video>_shotNNN_<j>.jpg   current config, one per frame: water blue, dry ground
+                  green, objects orange, A contacts red, A shore yellow, B/V objects magenta
+                  (box, top-to-waterline line, number = the object's k)
+  frames/<video>_shotNNN_<j>.jpg     the original frame, unmasked (copy, for the report)
+  crops/<video>_shotNNN_<j>_<k>.jpg  each B/V object, cropped and enlarged
+  object_labels.jsonl                object_sizes.py's answers, per (shot, frame, k, config, prompt)
+  overlays/gdino-sam2/, overlays/sam3/, overlays/sam3-wheels/, summary_gdino-sam2.json,
+  summary_sam3.json, summary_sam3-wheels.json   the earlier runs, kept as they were
+  summary.json    per route: coverage, abstain reasons, spread vs C1, gap to C4/C5, per shot
+  report.html     make_report.py: routes A and B next to the VLM's C1-C5, per shot
 ```
 
 Ids match the shot-scan ledger and `full_5cm/`, so results join with the VLM
@@ -289,6 +303,165 @@ What the overlays show:
 Within-shot spread could not be compared with the VLM: no shot was answered on
 all 3 frames. The go / no-go question is therefore not answered yet; the
 measured finding is that **route A covers ~1% of random flood frames**.
+
+### SAM 3 rerun (2026-11-04)
+
+Same 50 shots, same geometry, `--segmenter sam3` (config `geo:1f983847`);
+scored on the 46 the scene filter keeps.
+
+| | gdino-sam2 | sam3 |
+|---|---|---|
+| dry ground, median share of frame | 0.1% | 2.1% |
+| frames with no dry ground | 84 | 67 |
+| frames with no water | 19 | 10 |
+| plane fit too poor (> 5 cm) | 10 | 18 |
+| frames answered / shots with an answer | 2 / 1 | 5 / 4 |
+
+SAM 3 finds far more ground and water; answering frames went from 2 to 5.
+No answer has been checked against ground truth -- all of them are shown with
+their overlays and the VLM's C1-C5 in `geometry/report.html` for people who
+know flooding to judge. The stored numbers, without verdicts:
+
+| shot | segmenter | answer | contact minus shore level | note |
+|---|---|---|---|---|
+| `G91_dMVieV8:shot025` | gdino-sam2 | 25.4, 26.0 cm (2 of 3 frames) | -5, 21 cm | sam3 declines it: its ground mask adds the lawns beside the road, plane error 7-13 cm |
+| `OAZKqcG2HTU:shot002` | sam3 | 6.9 cm (frame 1) | -3 cm | night street, water around a hydrant |
+| `uH6EqiDJb0U:shot001` | sam3 | 32.1 cm (frame 1) | 52 cm | |
+| `_EkgRTOzd7E:shot009` | sam3 | -3.6, -3.0 cm (frames 2, 3) | 46, 32 cm | |
+| `E7knsQuTRLo:shot006` | sam3 | 197.4 cm (frame 1) | -159 cm | river in woodland; "ground" is the bank |
+| `iDiB4kzythQ:shot001` | sam3 | 233.9 cm (frame 1) | -165 cm | scene-filtered shot, not in the 46 |
+
+The contact-minus-shore gap is the method's own consistency number: water is
+level, so the two should agree. It is recorded but is not an abstain rule.
+Whether to make it one is open; the threshold should not be picked from these
+answers. Either way route A answers a handful of the 50 shots with either
+segmenter.
+
+### Routes A and B together, SAM 3 only (2026-11-04)
+
+Owner's decisions: every prediction runs BOTH routes, stored side by side
+(neither overrides the other), and segmentation is SAM 3 only -- the
+Grounding DINO + SAM 2 backend is removed from `segment.py` (its pilot rows
+stay in `frames.jsonl` under config `geo:8805ed22`). Grounding DINO is still
+used by the VLM benchmark's C5 boxes (`detect_refs.py`), which is separate.
+
+Route B was rewritten to be the known-size measurement on its own: per
+wheel whose mask has water within 3 px below it, the wheel's waterline is
+the median row of those pixels, visible height = (waterline row - top row) x
+distance / focal length (MoGe-2's distance and focal), depth = 66 cm -
+visible height; the frame's answer is the median over wheels. No ground
+plane and no frame-wide water level. Abstains: `no_wheel`,
+`no_wheel_in_water`, `wheels_disagree` (> 25 cm apart in one frame),
+`visible_taller_than_tyre` (depth < -5 cm), `implausible` (>= 66 cm). The
+2026-11-03 calibration measured wheels about 23% small with a wide spread at
+320 px; that applies to these numbers too.
+
+Config `geo:ad6cfddb`, the same 50 shots, scored on the 46 the scene filter
+keeps:
+
+| | route A | route B |
+|---|---|---|
+| frames answered (of 138) | 5 | 12 |
+| shots with an answer | 4 | 6 |
+| shots with all 3 frames answered | 0 | 3 |
+| main abstain | no dry ground 67 | no wheel found 91 |
+| within-shot spread, median (VLM C1 on the same shots) | -- | 12.7 cm (20.0) |
+
+No frame got an answer from both routes. Every answering shot, without
+verdicts (the page shows the overlays for judging):
+
+| shot | route A (per frame) | route B (per frame) | VLM C1 | C4 / C5 |
+|---|---|---|---|---|
+| `G91_dMVieV8:shot025` | plane fit poor x3 | 35.0, 29.3, 30.0 | 30-35, 10-15, 30-35 | 30-35 / 30-35 |
+| `fm3jEamEAvk:shot001` | no dry ground x3 | 44.2, 41.8, 31.5 | 45-50, 45-50, 40-45 | 50-55 / 50-55 |
+| `QBIdCeHrNDE:shot001` | -- | 3.7, 14.9, 19.3 | 30-35, 10-15, 10-15 | 45-50 / 30-35 |
+| `6sb8krWtsDY:shot001` | -- | 15.6, --, -- | 30-35, 20-25, 10-15 | 30-35 / 30-35 |
+| `DLsDHu-0Ru0:shot002` | plane fit poor x3 | --, --, 36.0 | 10-15, 10-15, 20-25 | 30-35 / 30-35 |
+| `by1rbFm-w1g:shot002` | -- | --, --, 61.3 | 40-45, 45-50, 20-25 | 100-105 / 100-105 |
+| `E7knsQuTRLo:shot006` | 197.4, --, -- | no wheel | 20-25, 10-15, 20-25 | 100-105 / X |
+| `OAZKqcG2HTU:shot002` | 7.0, --, -- | no wheel | 10-15 x3 | 30-35 / X |
+| `_EkgRTOzd7E:shot009` | --, 0.0, 0.0 | -- | 10-15 x3 | X / X |
+
+(`iDiB4kzythQ:shot001`, A 233.9 cm on frame 1, is a scene-filtered shot.)
+
+### Route B generalised: any reference object, table sizes (B) and VLM sizes (V) (2026-11-05)
+
+Owner's direction: route B must work for any object of known size, not only
+wheels; keep a fixed, high-fidelity size table as the reference; also try
+the VLM's own size estimate, and show how trustworthy it is.
+
+**Geometry (no size assumed).** SAM 3's object query gained traffic cone,
+traffic barrel, concrete barrier, guardrail, bollard, trash can (this also
+adds route A contact candidates). Every instance whose phrase can be a table
+entry and whose mask has water within 3 px below is kept (>= 20 px, IoU > 0.6
+across phrases = one object, at most 10 per frame): top row, own waterline
+row, distance, visible height = rows x distance / focal. Config `geo:299e6b18`.
+
+**Size table.** `reference_sizes.json`: what height the object's TOP is above
+the ground it stands on, with a range, a basis (standard / geometry from
+tyre size codes / typical spec sheets / varies) and a source line. Used only
+if the basis is not "varies", it stands on the flooded ground (house doors:
+the doorstep is often above the street) and the half-range is <= 20 cm.
+Persons, house doors, fences, full-size vans and box trucks are listed but
+not used. All entries say `checked: false`: written from known standards and
+spec sheets, not yet verified against the documents.
+
+**VLM (object_sizes.py), two separate questions per object**, on the frame
+upscaled 3x with a red box: (free) what is it, is its top visible, how high
+is its top in cm -- no table shown; (table) which table entry it is -- labels
+only, never heights. Route B = table height - visible; route V = VLM height -
+visible; per frame, the median over usable objects, abstain if they spread
+> 25 cm.
+
+The first table prompt (`objsize:5e36938d`) named the SAM 3 phrase and offered
+only that phrase's entries. The pick followed the detector: 9 of 15 objects
+picked as "bollard" were named mailbox, trash can, mooring post or dock piling
+by the free question. The current prompt (`objsize:f97f4307`) offers the whole
+table and does not name the phrase; 128 of 182 picks stayed the same. Both
+are kept in `object_labels.jsonl`; only the current prompt is scored.
+
+**Results**, 46 kept shots (138 frames), 182 objects standing in water in 60
+frames (car 41, wheel 40, bollard 28, person 19, door 17, guardrail 10, ...):
+
+| | route A | route B (table) | route V (VLM size) |
+|---|---|---|---|
+| frames answered | 6 | 23 | 27 |
+| shots with an answer | 5 | 12 | 18 |
+| shots, all 3 frames | 0 | 3 | 3 |
+| within-shot spread, median (VLM C1 same shots) | -- | 13.6 cm (5.0) | 28.1 cm (10.0) |
+| main abstains | no dry ground 67 | no object in water 68, not in table 14, objects disagree 8 | no object in water 68, objects disagree 24 |
+
+Same frame by two routes: B - V 9 frames, median |diff| 15 cm; A - B and A - V
+4 frames each.
+
+**How trustworthy the VLM's sizes are.** 10 of 182 free answers were not
+heights (degenerate output like `15000000...`, or 1500 for a car -- millimetres);
+sizes <= 0 or > 1000 cm are not answers (`MAX_VLM_SIZE_CM`). For the 109
+objects where the VLM picked a table entry and gave a usable height: median
+|VLM - table| 15 cm, 50% inside the table's range. It splits sharply by whether the two answers
+agree on WHAT the object is:
+
+| entry the VLM picked | n | table cm | VLM median cm | median abs diff |
+|---|---|---|---|---|
+| passenger-car tyre | 25 | 64 | 70 | 6 |
+| adult person | 18 | 170 | 175 | 5 |
+| sedan | 14 | 145 | 147.5 | 5 |
+| small/mid SUV | 6 | 170 | 170 | 0 |
+| bollard | 13 | 107 | 100 | 47 |
+| curbside mailbox | 7 | 135 | 120 | 15 |
+| SUV / pickup tyre | 7 | 76 | 150 | 74 |
+| guardrail | 5 | 79 | 100 | 21 |
+| heavy truck / bus tyre | 5 | 104 | 300 | 196 |
+| curb | 3 | 15 | 70 | 55 |
+
+Where the free answer names the same thing (car, car wheel, person) the
+VLM's sizes sit within ~5 cm of the table. The large gaps are objects the two
+questions identify differently: the free question called the "heavy tyre"
+objects a wheel loader and sized the whole machine; the "curb" objects a fire
+hydrant. So the VLM knows common sizes well, but which object it is sizing
+is not stable between questions, and that is what route V's spread (28 cm)
+reflects. Not yet a rule: abstaining when the two answers name different
+objects.
 
 ## Dry-scene calibration (2026-11-03)
 
@@ -364,24 +537,68 @@ objects are too few pixels for a centimetre-level measurement. Route B
 (and route A) should be re-tested on native-resolution frames once YouTube
 downloads work again; the calibration is a one-command rerun on them.
 
+## Scene filter (2026-11-04)
+
+`flood_depth_experiments/scene_split/scene_filter.py`: the local VLM (thinking
+off) sees each shot's key frame and picks one letter -- A direct view, B TV
+studio, C several pictures in one frame, D a filmed screen, E through a
+windscreen / window with the glass or interior in frame, F graphic. Labels,
+not a filter: one row per shot in
+`scrape_data/experiments/flood_depth/scene_filter/labels_*.jsonl`, nothing
+deleted. `geometry_depth.py`, `calibrate_dry.py` and `evaluate.py` leave out
+B-F by default (`SKIP`); `--scene all` puts them back. Unlabelled shots are
+kept. 17,895 shots labelled in ~1 h on 2 GPUs (5,000-9,500 shots/h per GPU),
+every reply a letter.
+
+| set | shots | direct | multi-picture | through glass | studio | screen | graphic | left out |
+|---|---|---|---|---|---|---|---|---|
+| flood shots (eligible) | 14,822 | 13,395 | 661 | 587 | 96 | 60 | 23 | 9.6% |
+| calibration frames (dry) | 3,073 | 2,352 | 122 | 220 | 120 | 18 | 241 | 23.5% |
+| geometry pilot | 50 | 46 | 1 | 3 | 0 | 0 | 0 | 8% |
+
+**Check against MoGe's measured scale** (calibration, kept masks, measured /
+true size, median):
+
+| scene | license plate width | wheel diameter | instances under 5 m |
+|---|---|---|---|
+| direct | 1.03 (n 230) | 0.76 (n 872) | 9% |
+| through glass | 0.90 (n 38) | **0.46** (n 124) | 28% |
+| multi-picture | 0.44 (n 3) | **0.09** (n 23) | 68% |
+| studio | 0.20 (n 1) | **0.14** (n 15) | 78% |
+| graphic | 0.25 (n 1) | -- | 100% |
+
+The flagged scenes are exactly where the scale breaks, through-glass included
+(wheels at half size), so it stays in `SKIP`. The filter is not complete:
+79 "direct" wheels under 5 m still measure 0.09 -- broken scenes the VLM
+called direct. A second, geometric check (MoGe distance < 5 m together with a
+reference object at a fraction of its size, or a large flat surface close
+to the camera) would catch those; not built. With the filter, the
+calibration's >= 10 m numbers barely move (plates 1.01 / 1.13 at 10-20 / 20+ m,
+wheels 0.75 / 0.81): the earlier verdict -- scale fine, route B
+resolution-limited -- stands. The geometry pilot keeps 46 of 50 shots and
+still answers the same 1 shot.
+
 ## Next
 
-1. **Scene filter first** (both runs point here): drop broadcast graphics,
-   picture-in-picture, split screens, through-windscreen / window shots, and
-   close-ups, before ANY depth method. A cheap VLM or CLIP question on the key
-   frame. Re-score both runs on what survives.
+1. **Scene filter** -- built, see "Scene filter". Open: the geometric second
+   check for broken scenes the VLM calls direct.
 2. **Native-resolution frames.** The calibration says resolution is the
    bottleneck for route B; rerun `calibrate_dry.py` on full-size frames when
    downloads work. If wheels then land within ~10%, build route B on the flood
    frames with contacts.
 3. **Wheel bias**: if the -23% survives at native resolution, correct it
    with the measured ratio or fit the ellipse to the rim edge, not the mask.
-4. Rerun the flood pilot with SAM 3 (`--segmenter sam3`) and compare water
-   masks on the same 150 frames.
+4. ~~Rerun the flood pilot with SAM 3~~ -- done, see "SAM 3 rerun": more
+   ground and water found, no more usable answers. Open: whether to make
+   the contact-vs-shore level gap an abstain rule.
 5. A hand-picked pilot of shots that DO show dry ground, to test route A's
    accuracy where it applies.
 6. Only then: C7a / C7b in `run_conditions.py`, and the STN high-water-mark
    subset for accuracy.
+
+7. Routes B / V: verify `reference_sizes.json` against the standards / spec
+   sheets (`checked: true`); decide whether an object counts only when the
+   free and table answers name the same thing.
 
 ## Open questions
 

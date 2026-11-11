@@ -309,7 +309,8 @@ verification/     judging only         verify_text.py, verify_images_vlm.py, ded
                   country pass         locate_articles.py, country_codes.py, make_iso_table.py,
                                        compile_countries.py
 local_vlm/        model mechanics      backend.py, download_model.py
-flood_depth_experiments/ scene_split/ (shot detection + per-shot flood scan),
+flood_depth_experiments/ scene_split/ (shot detection + per-shot flood scan,
+                  scene_filter.py: direct view vs studio/screen/through-glass labels),
                   flood_depth/ (water-depth benchmark, PLAN.md),
                   depth_detection/ (geometry depth: MoGe-2 + segmentation, design in
                   docs/water_depth_segmentation.md)

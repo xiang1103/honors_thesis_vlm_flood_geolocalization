@@ -259,7 +259,7 @@ def run(args) -> None:
             raise SystemExit("no GPU with 20 GiB free")
         device = f"cuda:{gpu}"
     moge = MoGeModel.from_pretrained(MOGE_ID).to(device).eval()
-    seg = Segmenter("sam3", device)
+    seg = Segmenter(device)
     phrases = [p for p, _ in REFERENCES.values()] + CONTEXT
     by_phrase = {p: c for c, (p, _) in REFERENCES.items()}
     rng = np.random.default_rng(0)
